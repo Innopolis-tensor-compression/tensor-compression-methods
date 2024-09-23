@@ -1,13 +1,18 @@
 [project]
 name = "tensor-compression-methods"
 version = "0.1.0"
-description = "Add your description here"
+description = "Some experiments with tensor methods compression"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "jupyter>=1.1.1",
+    "matplotlib>=3.9.2",
     "numpy>=2.1.1",
     "pandas>=2.2.3",
+    "pillow>=10.4.0",
+    "requests>=2.32.3",
+    "scipy>=1.14.1",
+    "seaborn>=0.13.2",
 ]
 
 [tool.uv]
@@ -50,14 +55,11 @@ extend-ignore = [
     "D401",
     "D415",
     "D211",
-    "E402",   # false positives for local imports
-    "E501",   # line too long
     "TRY003", # external messages in exceptions are too verbose
     "TD002",
     "TD003",
     "FIX002", # too verbose descriptions of todos
     "D203",
-    "ISC001",
     "PLR0913", # Too many arguments in function definition (x > 5)
     "B018", # Found useless expression. Either assign it to a variable or remove it
     "PLR0912", # Too many branches
