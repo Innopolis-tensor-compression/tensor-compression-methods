@@ -1,32 +1,38 @@
 # Prepare project to code something:
 
-## Install uv
-```shell
-irm https://astral.sh/uv/install.ps1 | iex
+## Instructions for developers:
+
+In this project, Python 3.11 was used.
+
+### Main instruction with uv tool (recommended)
+
+In this project UV Project Manager was used, check its [documentation](https://docs.astral.sh/uv) and [source code](https://github.com/astral-sh/uv).
+
+#### Install uv
+
+```
+# On macOS and Linux.
+$ curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# On Windows.
+$ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# With pip.
+$ pip install uv
 ```
 
-## Install venv
+See the [installation documentation](https://docs.astral.sh/uv/getting-started/installation/) for details and alternative installation methods.
+
+#### Install venv by [sync command](https://docs.astral.sh/uv/reference/cli/#uv-sync)
+
 ```shell
 uv sync
 ```
 
-## Update your terminal to use virtual env
+#### Use created venv for next commands
 
-## Install pre-commit hooks
+#### Set up the git hook scripts by [pre-commit](https://pre-commit.com/#3-install-the-git-hook-scripts)
+
 ```shell
 pre-commit install
 ```
-
-## Update pre-commit hooks
-```shell
-pre-commit autoupdate
-```
-
-# Some instructions:
-## To install some libraries, you need to use this command:
-```shell
-uv add <your_lib_name>
-```
-
-## To do some customizations in venv, use only uv commands, check out this documentation:
-https://docs.astral.sh/uv/
