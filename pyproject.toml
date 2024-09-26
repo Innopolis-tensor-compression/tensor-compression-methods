@@ -8,11 +8,16 @@ dependencies = [
     "jupyter>=1.1.1",
     "matplotlib>=3.9.2",
     "numpy>=2.1.1",
+    "opencv-python>=4.10.0.84",
     "pandas>=2.2.3",
     "pillow>=10.4.0",
+    "psutil>=6.0.0",
+    "python-dotenv>=1.0.1",
     "requests>=2.32.3",
     "scipy>=1.14.1",
     "seaborn>=0.13.2",
+    "tqdm>=4.66.5",
+    "yt-dlp>=2024.8.6",
 ]
 
 [tool.uv]
@@ -65,4 +70,6 @@ extend-ignore = [
     "PLR0912", # Too many branches
     "PLR0915", # Too many statements
     "T201",  # `print` found
+    "ERA001",
+    "RUF001",  # RUF001 String contains ambiguous `е` (CYRILLIC SMALL LETTER IE). Did you mean `e` (LATIN SMALL LETTER E)?
 ]
