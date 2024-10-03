@@ -29,6 +29,19 @@ See the [installation documentation](https://docs.astral.sh/uv/getting-started/i
 uv sync
 ```
 
+```shell
+.venv\Scripts\activate
+```
+
+```shell
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
+
+(optional)
+```shell
+uv pip install tensorflow
+```
+
 #### Use created venv for next commands
 
 #### Set up the git hook scripts by [pre-commit](https://pre-commit.com/#3-install-the-git-hook-scripts)
