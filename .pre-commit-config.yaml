@@ -2,7 +2,7 @@
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.7
+    rev: v0.6.9
     hooks:
       - id: ruff
         args: [--fix]
@@ -16,4 +16,3 @@ repos:
     hooks:
       - id: mypy
         args: [--config-file=mypy.ini]
-#        additional_dependencies: [pyqt6>=6.7.1]
