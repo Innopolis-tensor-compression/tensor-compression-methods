@@ -1,45 +1,38 @@
-import gc
 from pathlib import Path
 from pprint import pprint
 from typing import Any
 
 import json5
-import numpy as np
-import torch
-from numba import cuda
 from tqdm import tqdm
 
 from src.utils.method_runners import MethodRunner
+from src.utils.tensor_handlers import gpu_torch_memory_manager
 
 
 class MethodLogger:
-    experiments_count = 1
-    log_dir_path = Path("../../.cache")
+    experiments_count = 10
+    log_dir_path = Path(__file__).parent.parent / ".cache"
 
-    def __init__(
-        self, method_name: str, method_input_tensor: np.ndarray, qualitative_metrics: dict[str, str], runner: MethodRunner, method_args: dict[str, Any]
-    ):
+    def __init__(self, method_name: str, qualitative_metrics: dict[str, str], runner: MethodRunner, method_args: dict[str, Any]):
         self.name = method_name
         self.method_args: dict[str, Any] = method_args
         self.qualitative_metrics = qualitative_metrics
-
-        self.method_input_tensor = method_input_tensor
         self.runner = runner
 
         self.quantitative_metrics: dict[str, list[float]] = {}
+        self.library_method_name = self.runner.library_method_name
 
-    def run_experiments(self, *args, **kwargs):
+        self.run_experiments()
+
+    def run_experiments(self) -> None:
         for _ in tqdm(range(MethodLogger.experiments_count), desc="Эксперимент набора параметров"):
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            cuda.get_current_device().reset()
-            gc.collect()
+            with gpu_torch_memory_manager():
+                self.runner.run(**self.method_args)
 
-            self.runner.run(*args, **kwargs)
+            metrics = self.runner.get_metrics(library_method_name=self.library_method_name)
 
-            metrics = self.runner.get_metrics()
             for metric_name, metric_value in metrics.items():
-                if metric_name in self.qualitative_metrics:
+                if metric_name in self.quantitative_metrics:
                     self.quantitative_metrics[metric_name].append(metric_value)
                 else:
                     self.quantitative_metrics[metric_name] = [metric_value]
@@ -66,7 +59,7 @@ class MethodLogger:
                 with log_file_path.open("w+", encoding="utf-8") as f:
                     json5.dump([method_logs], f, ensure_ascii=False, indent=4)
             else:
-                with log_file_path.open("w+", encoding="utf-8") as f:
+                with log_file_path.open("r+", encoding="utf-8") as f:
                     logs = json5.load(f)
 
                     existing_log = next(

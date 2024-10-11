@@ -88,5 +88,8 @@ extend-ignore = [
     "FBT002",
     "FBT001",
     "PGH003",
+    "S110", # S110 `try`-`except`-`pass` detected, consider logging the exception
+    "EM102", # EM102 Exception must not use an f-string literal, assign to variable first
+    "E402", # E402 Module level import not at top of cell
 
 ]

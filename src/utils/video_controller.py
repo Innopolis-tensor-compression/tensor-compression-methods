@@ -30,12 +30,12 @@ def download_youtube_video(video_url, cache_dir=None, proxy_url=None):
     else:
         cache_video_path = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name)
 
-    if Path(cache_video_path).exists():
+    if cache_video_path.exists():
         print(f"Видео уже загружено и закешировано: {cache_video_path}")
         return cache_video_path
 
     ydl_opts = {
-        "format": "best",
+        "format": "134",
         "outtmpl": str(cache_video_path),
         "progress_hooks": [download_progress_hook],
     }
@@ -89,20 +89,3 @@ def show_frames_as_video(frames):
         if cv2.waitKey(25) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows()
-
-
-def save_frames_as_video(name, frames, fps, frame_size):
-    output_path = f"../.cache/output_videos/{name}.mp4"
-
-    Path("../../.cache/output_videos").mkdir(parents=True, exist_ok=True)
-
-    width, height = frame_size
-    size = (width, height)
-
-    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
-
-    for frame in frames:
-        out.write(frame)
-
-    out.release()
-    print(f"Видео сохранено как {output_path}")

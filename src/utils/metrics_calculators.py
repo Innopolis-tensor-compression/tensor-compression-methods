@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Any
 
 import numpy as np
 import tensorly as tl
@@ -21,28 +20,69 @@ class IMetricCalculator(ABC):
         pass
 
 
-class FrobeniusErrorTensorLyCalculator(IMetricCalculator):
+class FrobeniusErrorCalculator(IMetricCalculator):
     @classmethod
     def calculate(cls, original_tensor, reconstructed_tensor) -> float:
         error = tl.norm(reconstructed_tensor - original_tensor) / tl.norm(original_tensor)
         return 100.0 * error.item()
 
 
-class CompressionRatioCalculator(IMetricCalculator):
+class FrobeniusErrorFactory:
+    @staticmethod
+    def create_calculators(library_method_name: str) -> IMetricCalculator:
+        metrics_calculators = {
+            "TensorLy_Tucker": FrobeniusErrorCalculator(),
+            "TensorLy_TensorTrain": FrobeniusErrorCalculator(),
+            "T3F_TensorTrain": FrobeniusErrorCalculator(),
+        }
+
+        if library_method_name in metrics_calculators:
+            return metrics_calculators[library_method_name]
+        raise ValueError(f"Unknown library method name: {library_method_name}")
+
+
+class CompressionRatioTensorLyTuckerCalculator(IMetricCalculator):
     @classmethod
-    def calculate(cls, original_tensor, core, factors) -> float:
+    def calculate(cls, original_tensor, method_result) -> float:
+        core, factors = method_result
+
         original_size = IMetricCalculator.get_tensors_size(original_tensor)
         compressed_size = IMetricCalculator.get_tensors_size(core, *factors)
         return 100.0 * compressed_size / original_size
 
 
-class MetricCalculatorFactory:
+class CompressionRatioTensorLyTensorTrainCalculator(IMetricCalculator):
+    @classmethod
+    def calculate(cls, original_tensor, method_result) -> float:
+        tt_factors = method_result
+
+        original_size = IMetricCalculator.get_tensors_size(original_tensor)
+        compressed_size = IMetricCalculator.get_tensors_size(*tt_factors)
+        return 100.0 * compressed_size / original_size
+
+
+class CompressionRatioT3FTensorTrainCalculator(IMetricCalculator):
+    @classmethod
+    def calculate(cls, original_tensor, method_result) -> float:
+        tt_factors = method_result
+
+        original_size = IMetricCalculator.get_tensors_size(original_tensor)
+        compressed_size = IMetricCalculator.get_tensors_size(*tt_factors.tt_cores)
+        return 100.0 * compressed_size / original_size
+
+
+class CompressionRationFactory:
     @staticmethod
-    def create_calculators(library_method_name: str) -> Any:
-        if library_method_name == "TensorLy_Tucker":
-            return FrobeniusErrorTensorLyCalculator(), CompressionRatioCalculator()
-        error_message = f"Неизвестный метод: {library_method_name}"
-        raise ValueError(error_message)
+    def create_calculators(library_method_name: str) -> IMetricCalculator:
+        metrics_calculators = {
+            "TensorLy_Tucker": CompressionRatioTensorLyTuckerCalculator(),
+            "TensorLy_TensorTrain": CompressionRatioTensorLyTensorTrainCalculator(),
+            "T3F_TensorTrain": CompressionRatioT3FTensorTrainCalculator(),
+        }
+
+        if library_method_name in metrics_calculators:
+            return metrics_calculators[library_method_name]
+        raise ValueError(f"Unknown library method name: {library_method_name}")
 
 
 def compute_stats(data):
