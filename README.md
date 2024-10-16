@@ -52,13 +52,13 @@ source .venv/bin/activate
 .venv\Scripts\activate
 ```
 
-##### Check GPU available for torch
+##### Check GPU available for torch (skip for Windows)
 
 ```shell
 python -c "import torch; print(torch.cuda.is_available())"
 ```
 
-##### Check GPU available for tensorflow
+##### Check GPU available for tensorflow (skip for Windows)
 
 ```shell
 python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
