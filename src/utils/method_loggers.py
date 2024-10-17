@@ -11,7 +11,7 @@ from src.utils.tensor_handlers import gpu_torch_memory_manager
 
 class MethodLogger:
     experiments_count = 10
-    log_dir_path = Path(__file__).parent.parent / ".cache"
+    log_dir_path = Path(__file__).parent.parent.parent / ".cache"
 
     def __init__(self, method_name: str, qualitative_metrics: dict[str, str], runner: MethodRunner, method_args: dict[str, Any]):
         self.name = method_name

@@ -4,7 +4,7 @@ import torch
 
 from src.utils.metrics_calculators import CompressionRationFactory, FrobeniusErrorFactory
 from src.utils.tensor_reconstructors import TensorReconstructorFactory
-from src.utils.trackers import GPUTorchMemoryTracker, ITimeTracker, RAMMemoryTracker
+from src.utils.trackers import IGPUMemoryTracker, IRAMMemoryTracker, ITimeTracker
 
 
 class MethodRunner:
@@ -14,8 +14,8 @@ class MethodRunner:
         method_input_tensor,
         library_method_name: str,
         backend_name: str,
-        gpu_memory_tracker: GPUTorchMemoryTracker,
-        ram_memory_tracker: RAMMemoryTracker,
+        gpu_memory_tracker: IGPUMemoryTracker,
+        ram_memory_tracker: IRAMMemoryTracker,
         time_tracker: ITimeTracker,
     ):
         self.func = func
@@ -32,8 +32,9 @@ class MethodRunner:
         self.time_tracker = time_tracker
 
     def run(self, *args, **kwargs) -> None:
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
+        if self.backend_name == "pytorch":
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
         gc.collect()
 
         self.gpu_memory_tracker.start()
@@ -41,7 +42,8 @@ class MethodRunner:
 
         self.result = self.func(*args, **kwargs)
 
-        torch.cuda.synchronize()
+        if self.backend_name == "pytorch":
+            torch.cuda.synchronize()
         self.time_tracker.stop()
         self.gpu_memory_tracker.stop()
 
@@ -49,8 +51,9 @@ class MethodRunner:
 
         self.reconstructed_tensor = self.calculate_reconstructed_tensor(library_method_name=self.library_method_name)
 
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
+        if self.backend_name == "pytorch":
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
         gc.collect()
 
     def calculate_reconstructed_tensor(self, library_method_name: str):

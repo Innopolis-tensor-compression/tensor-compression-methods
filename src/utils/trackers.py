@@ -1,25 +1,26 @@
 import time
 from abc import ABC, abstractmethod
 
+import tensorflow as tf
 import torch
 from memory_profiler import memory_usage
 
 
-class IMemoryTracker(ABC):
+class IGPUMemoryTracker(ABC):
     @abstractmethod
     def get_usage(self) -> dict:
         pass
 
     @abstractmethod
-    def start(self):
+    def start(self) -> None:
         pass
 
     @abstractmethod
-    def stop(self):
+    def stop(self) -> None:
         pass
 
 
-class GPUTorchMemoryTracker(IMemoryTracker):
+class GPUTorchMemoryTracker(IGPUMemoryTracker):
     def __init__(self):
         self.gpu_allocated_memory_before = 0.0
         self.gpu_allocated_memory_after = 0.0
@@ -40,7 +41,44 @@ class GPUTorchMemoryTracker(IMemoryTracker):
         return {"gpu_allocated_memory_used_mb": gpu_allocated_memory_used / 1024**2, "gpu_cached_memory_used_mb": gpu_cached_memory_used / 1024**2}
 
 
-class RAMMemoryTracker:
+class GPUTensorflowMemoryTracker(IGPUMemoryTracker):
+    def __init__(self, tf_devices: list[str]):
+        self.devices = tf_devices
+
+        self.gpu_allocated_memory_before = 0.0
+        self.gpu_allocated_memory_after = 0.0
+        self.gpu_cached_memory_before = 0.0
+        self.gpu_cached_memory_after = 0.0
+
+    def start(self) -> None:
+        devices_memory_info = list(map(tf.config.experimental.get_memory_info, self.devices))
+
+        self.gpu_allocated_memory_before = sum(device_memory_info["current"] / (1024**2) for device_memory_info in devices_memory_info)
+        self.gpu_cached_memory_before = sum(device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info)
+
+    def stop(self) -> None:
+        devices_memory_info = list(map(tf.config.experimental.get_memory_info, self.devices))
+
+        self.gpu_allocated_memory_after = sum(device_memory_info["current"] / (1024**2) for device_memory_info in devices_memory_info)
+        self.gpu_cached_memory_after = sum(device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info)
+
+    def get_usage(self) -> dict:
+        gpu_allocated_memory_used = self.gpu_allocated_memory_after - self.gpu_allocated_memory_before
+        gpu_cached_memory_used = self.gpu_cached_memory_after - self.gpu_cached_memory_before
+        return {"gpu_allocated_memory_used_mb": gpu_allocated_memory_used, "gpu_cached_memory_used_mb": gpu_cached_memory_used}
+
+
+class IRAMMemoryTracker(ABC):
+    @abstractmethod
+    def run_tracker(self, *args, **kwargs) -> None:
+        pass
+
+    @abstractmethod
+    def get_usage(self) -> dict:
+        pass
+
+
+class RAMMemoryTracker(IRAMMemoryTracker):
     def __init__(self):
         self.ram_allocated_memory = 0.0
 

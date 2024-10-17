@@ -8,6 +8,7 @@ dependencies = [
     "json5>=0.9.25",
     "jupyter>=1.1.1",
     "jupyterlab>=4.2.5",
+    "kagglehub>=0.3.2",
     "matplotlib>=3.9.2",
     "memory-profiler>=0.61.0",
     "notebook>=7.2.2",
@@ -16,15 +17,19 @@ dependencies = [
     "pandas>=2.2.3",
     "physics-tenpy>=1.0.4; platform_system != 'Windows'",
     "pip>=24.2",
+    "plotly>=5.24.1",
     "psutil>=6.0.0",
     "python-dotenv>=1.0.1",
     "scikit-learn>=1.5.2",
     "seaborn>=0.13.2",
+    "stubs>=1.0.0",
     "t3f>=1.2.0; platform_system != 'Windows'",
     "tensorflow[and-cuda]>=2.17.0; platform_system != 'Windows'",
     "tensorly>=0.8.1; platform_system != 'Windows'",
     "torch>=2.0.1; platform_system != 'Windows'",
+    "torchvision>=0.15.2; platform_system != 'Windows'",
     "tqdm>=4.66.5; platform_system != 'Windows'",
+    "types-requests>=2.32.0.20241016",
     "yt-dlp>=2024.9.27",
 ]
 
@@ -91,5 +96,6 @@ extend-ignore = [
     "S110", # S110 `try`-`except`-`pass` detected, consider logging the exception
     "EM102", # EM102 Exception must not use an f-string literal, assign to variable first
     "E402", # E402 Module level import not at top of cell
+    "RUF002",
 
 ]
