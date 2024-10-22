@@ -97,5 +97,5 @@ extend-ignore = [
     "EM102", # EM102 Exception must not use an f-string literal, assign to variable first
     "E402", # E402 Module level import not at top of cell
     "RUF002",
-
+    "NPY002",
 ]

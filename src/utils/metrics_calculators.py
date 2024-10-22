@@ -34,6 +34,7 @@ class FrobeniusErrorFactory:
             "TensorLy_Tucker": FrobeniusErrorCalculator(),
             "TensorLy_TensorTrain": FrobeniusErrorCalculator(),
             "T3F_TensorTrain": FrobeniusErrorCalculator(),
+            "TensorLy_CP": FrobeniusErrorCalculator(),
         }
 
         if library_method_name in metrics_calculators:
@@ -71,6 +72,16 @@ class CompressionRatioT3FTensorTrainCalculator(IMetricCalculator):
         return 100.0 * compressed_size / original_size
 
 
+class CompressionRatioTensorLyCPCalculator(IMetricCalculator):
+    @classmethod
+    def calculate(cls, original_tensor, method_result) -> float:
+        weights, factors = method_result
+
+        original_size = IMetricCalculator.get_tensors_size(original_tensor)
+        compressed_size = IMetricCalculator.get_tensors_size(weights, *factors)
+        return 100.0 * compressed_size / original_size
+
+
 class CompressionRationFactory:
     @staticmethod
     def create_calculators(library_method_name: str) -> IMetricCalculator:
@@ -78,6 +89,7 @@ class CompressionRationFactory:
             "TensorLy_Tucker": CompressionRatioTensorLyTuckerCalculator(),
             "TensorLy_TensorTrain": CompressionRatioTensorLyTensorTrainCalculator(),
             "T3F_TensorTrain": CompressionRatioT3FTensorTrainCalculator(),
+            "TensorLy_CP": CompressionRatioTensorLyCPCalculator(),
         }
 
         if library_method_name in metrics_calculators:

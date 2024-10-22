@@ -22,6 +22,12 @@ class TensorLyTensorTrainTensorReconstructor(ITensorReconstructor):
         return tl.tt_to_tensor(tt_factors)
 
 
+class TensorLyCPTensorReconstructor(ITensorReconstructor):
+    def calculate(self, method_result) -> float:
+        weight, factors = method_result
+        return tl.cp_tensor.cp_to_tensor((weight, factors))
+
+
 class T3FTensorTrainTensorReconstructor(ITensorReconstructor):
     def calculate(self, method_result) -> float:
         tt_factors = method_result
@@ -35,6 +41,7 @@ class TensorReconstructorFactory:
             "TensorLy_Tucker": TensorLyTuckerTensorReconstructor(),
             "TensorLy_TensorTrain": TensorLyTensorTrainTensorReconstructor(),
             "T3F_TensorTrain": T3FTensorTrainTensorReconstructor(),
+            "TensorLy_CP": TensorLyCPTensorReconstructor(),
         }
 
         if library_method_name in reconstructors:

@@ -32,6 +32,8 @@ class MethodRunner:
         self.time_tracker = time_tracker
 
     def run(self, *args, **kwargs) -> None:
+        # self.result = None
+        # self.reconstructed_tensor = None
         if self.backend_name == "pytorch":
             torch.cuda.synchronize()
             torch.cuda.empty_cache()

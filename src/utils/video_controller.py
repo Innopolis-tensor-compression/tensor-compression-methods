@@ -35,16 +35,28 @@ def download_youtube_video(video_url, cache_dir=None, proxy_url=None):
         return cache_video_path
 
     ydl_opts = {
-        "format": "134",
+        "format": "133",
         "outtmpl": str(cache_video_path),
         "progress_hooks": [download_progress_hook],
     }
+
+    # ydl_opts = {
+    #     'simulate': True,
+    #     'listformats': True,
+    #     "progress_hooks": [download_progress_hook],
+    # }
 
     if proxy_url:
         ydl_opts["proxy"] = proxy_url
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([video_url])
+        video_info = ydl.download([video_url])
+
+        if "listformats" in ydl_opts:
+            formats = video_info.get("formats", [])
+            print("Доступные форматы:")
+            for fmt in formats:
+                print(f"ID: {fmt['format_id']}, Разрешение: {fmt['resolution']}, Видео кодек: {fmt['vcodec']}, Аудио кодек: {fmt['acodec']}")
 
     print(f"Видео загружено и сохранено: {cache_video_path}")
     return cache_video_path
