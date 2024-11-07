@@ -243,3 +243,4 @@ fabric.properties
 # other
 /docs/tasks.md
 /experiments/data
+.cache/eeg/*
