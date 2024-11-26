@@ -2901,7 +2901,7 @@ dependencies = [
     { name = "stubs" },
     { name = "t3f", marker = "platform_system != 'Windows'" },
     { name = "tensorflow", extra = ["and-cuda"], marker = "platform_system != 'Windows'" },
-    { name = "tensorly", marker = "platform_system != 'Windows'" },
+    { name = "tensorly" },
     { name = "torch", version = "2.0.1", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_system != 'Darwin' and platform_system != 'Windows') or (platform_system != 'Darwin' and platform_system != 'Linux' and platform_system != 'Windows')" },
     { name = "torch", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "platform_system == 'Darwin' or (platform_machine == 'aarch64' and platform_system == 'Linux')" },
     { name = "torchvision", version = "0.15.2", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_system != 'Darwin' and platform_system != 'Windows') or (platform_system != 'Darwin' and platform_system != 'Linux' and platform_system != 'Windows')" },
@@ -2945,7 +2945,7 @@ requires-dist = [
     { name = "stubs", specifier = ">=1.0.0" },
     { name = "t3f", marker = "platform_system != 'Windows'", specifier = ">=1.2.0" },
     { name = "tensorflow", extras = ["and-cuda"], marker = "platform_system != 'Windows'", specifier = ">=2.17.0" },
-    { name = "tensorly", marker = "platform_system != 'Windows'", specifier = ">=0.8.1" },
+    { name = "tensorly", specifier = ">=0.9.0" },
     { name = "torch", marker = "platform_system != 'Windows'", specifier = ">=2.0.1" },
     { name = "torchvision", marker = "platform_system != 'Windows'", specifier = ">=0.15.2" },
     { name = "tqdm", marker = "platform_system != 'Windows'", specifier = ">=4.66.5" },
@@ -3062,15 +3062,15 @@ wheels = [
 
 [[package]]
 name = "tensorly"
-version = "0.8.1"
+version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "platform_system != 'Windows'" },
-    { name = "scipy", marker = "platform_system != 'Windows'" },
+    { name = "numpy" },
+    { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/7f/813ac904fc85733a93a9703aea5fe320f0573855cf0eb092531c6b0a8a88/tensorly-0.8.1.tar.gz", hash = "sha256:cf78e4ffe612feca3510214002845c6831b267b1f2c1181154d41430310b237d", size = 171251 }
+sdist = { url = "https://files.pythonhosted.org/packages/57/39/76a859505dc5331cf43baba1fc011e85184c8ad0dbe01e6b01fe0f935ea2/tensorly-0.9.0.tar.gz", hash = "sha256:9b970dde47e2267a17b66a1444113e879c0bb77fb22f497a4207eb2b548ff792", size = 7327121 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/6c/b07811af60b429d29ff1aab7a8d7b845f24e27462c7455c3df734007dd67/tensorly-0.8.1-py3-none-any.whl", hash = "sha256:08988dbc5e433c3f255d0e00855f99a613fe273d50a1627b7e82b03ff2a6da9a", size = 229666 },
+    { url = "https://files.pythonhosted.org/packages/c3/ad/83380fb3c85ddf68c509059cf328374c1878f87382070475abc72867c7ba/tensorly-0.9.0-py3-none-any.whl", hash = "sha256:a393022ff1616a36c021496f46a955d94234d6bc8c42793f477a6be8849f4873", size = 7414316 },
 ]
 
 [[package]]

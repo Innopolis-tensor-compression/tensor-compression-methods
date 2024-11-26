@@ -29,7 +29,7 @@ dependencies = [
     "stubs>=1.0.0",
     "t3f>=1.2.0; platform_system != 'Windows'",
     "tensorflow[and-cuda]>=2.17.0; platform_system != 'Windows'",
-    "tensorly>=0.8.1; platform_system != 'Windows'",
+    "tensorly>=0.9.0",
     "torch>=2.0.1; platform_system != 'Windows'",
     "torchvision>=0.15.2; platform_system != 'Windows'",
     "tqdm>=4.66.5; platform_system != 'Windows'",
