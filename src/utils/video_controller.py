@@ -22,7 +22,7 @@ def extract_video_id(video_url: str):
     raise ValueError(error_message)
 
 
-def download_youtube_video(video_url, cache_dir=None, proxy_url=None):
+def download_youtube_video(video_url, is_test=False, cache_dir=None, proxy_url=None):
     if cache_dir:
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
         video_id = extract_video_id(video_url)
@@ -34,17 +34,18 @@ def download_youtube_video(video_url, cache_dir=None, proxy_url=None):
         print(f"Видео уже загружено и закешировано: {cache_video_path}")
         return cache_video_path
 
-    ydl_opts = {
-        "format": "133",
-        "outtmpl": str(cache_video_path),
-        "progress_hooks": [download_progress_hook],
-    }
-
-    # ydl_opts = {
-    #     'simulate': True,
-    #     'listformats': True,
-    #     "progress_hooks": [download_progress_hook],
-    # }
+    if is_test:
+        ydl_opts = {
+            "simulate": True,
+            "listformats": True,
+            "progress_hooks": [download_progress_hook],
+        }
+    else:
+        ydl_opts = {
+            "format": "worstvideo[ext=mp4][vcodec!^=av01]",
+            "outtmpl": str(cache_video_path),
+            "progress_hooks": [download_progress_hook],
+        }
 
     if proxy_url:
         ydl_opts["proxy"] = proxy_url
@@ -52,11 +53,11 @@ def download_youtube_video(video_url, cache_dir=None, proxy_url=None):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         video_info = ydl.download([video_url])
 
-        if "listformats" in ydl_opts:
+        if "listformats" in ydl_opts and video_info != 0:
             formats = video_info.get("formats", [])
             print("Доступные форматы:")
-            for fmt in formats:
-                print(f"ID: {fmt['format_id']}, Разрешение: {fmt['resolution']}, Видео кодек: {fmt['vcodec']}, Аудио кодек: {fmt['acodec']}")
+            for frmt in formats:
+                print(f"ID: {frmt['format_id']}, Разрешение: {frmt['resolution']}, Видео кодек: {frmt['vcodec']}, Аудио кодек: {frmt['acodec']}")
 
     print(f"Видео загружено и сохранено: {cache_video_path}")
     return cache_video_path

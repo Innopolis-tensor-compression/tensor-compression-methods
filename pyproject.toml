@@ -105,5 +105,6 @@ extend-ignore = [
     "PERF102", # PERF102 When using only the keys of a dict use the `keys()` method
     "B007",  # B007 Loop control variable `some name` not used within loop body
     "N816", # N816 Variable in global scope should not be mixedCase
+    "E501",
 
 ]

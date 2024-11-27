@@ -19,11 +19,10 @@ class MethodLogger:
         self.method_args: dict[str, Any] = method_args
         self.qualitative_metrics = qualitative_metrics
         self.runner = runner
+        self.error_message = ""
 
         self.quantitative_metrics: dict[str, list[float]] = {}
         self.library_method_name = self.runner.library_method_name
-
-        self.run_experiments()
 
     def run_experiments(self) -> None:
         for _ in tqdm(range(MethodLogger.experiments_count if not self.is_test else 1), desc="Эксперимент набора параметров"):
@@ -44,6 +43,7 @@ class MethodLogger:
             "method_args": dict(self.method_args.copy()),
             "qualitative_metrics": self.qualitative_metrics.copy(),
             "quantitative_metrics": self.quantitative_metrics.copy(),
+            "error_message": self.error_message,
         }
 
         excluded_data = ["tensor", "input_tensor", "tens", "sites"]
