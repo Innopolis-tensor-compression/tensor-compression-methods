@@ -106,5 +106,6 @@ extend-ignore = [
     "B007",  # B007 Loop control variable `some name` not used within loop body
     "N816", # N816 Variable in global scope should not be mixedCase
     "E501",
+    "BLE001"
 
 ]
