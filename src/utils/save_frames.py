@@ -18,6 +18,7 @@ class SaveFramesFactory:
         save_methods = {
             "image": SaveFramesAsImage(),
             "video": SaveFramesAsVideo(),
+            "eeg": SaveFramesAsEEG(),
         }
 
         if frame_name in save_methods:
@@ -37,6 +38,12 @@ class SaveFramesAsImage(SaveFrames):
         cv2.imwrite(output_path.__str__(), frames_bgr)
 
         print(f"Изображение сохранено как {output_path}")
+
+
+class SaveFramesAsEEG(SaveFrames):
+    @staticmethod
+    def save_frames(name, frames):  # noqa: ARG004
+        print("Зачем сейвить ЭЭГ?")
 
 
 class SaveFramesAsVideo(SaveFrames):

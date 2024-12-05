@@ -2,6 +2,8 @@ import tempfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import mne
+import numpy as np
 import requests  # type: ignore
 from scipy.io import loadmat
 from tqdm import tqdm
@@ -80,3 +82,167 @@ def extract_mat_data(mat_path: str):
     :return: Данные из .mat файла
     """
     return loadmat(mat_path)
+
+
+def get_eegbci_dataset(cache_dir_eeg: str):
+    eeg_raw_list: dict[int, dict] = {}
+    subjects = list(range(1, 5))  # 110
+    runs = list(range(3, 15))  # 15
+
+    for subject in subjects:
+        eeg_raw_list[subject] = {}
+
+    for subject in subjects:
+        data_path = mne.datasets.eegbci.load_data(subject=subject, runs=runs, path=cache_dir_eeg)
+        raw_fnames = data_path
+
+        for run_idx, f in enumerate(raw_fnames, start=3):
+            raw = mne.io.read_raw_edf(f, preload=True)
+
+            raw.rename_channels({ch: ch.replace(".", "").upper().replace("Z", "z").replace("FP1", "Fp1").replace("FP2", "Fp2") for ch in raw.ch_names})
+
+            eeg_raw_list[subject][run_idx] = raw
+
+    montage_copy = mne.channels.make_standard_montage("biosemi64").copy()
+
+    coords_t9 = np.array([-0.08869014, -0.0, -0.04014873])
+    coords_t10 = np.array([0.08869014, 0.0, -0.04014873])
+
+    def edit_montage_dig(montage, old_name, new_name, new_coords=None) -> None:
+        if old_name in montage.ch_names:
+            idx = montage.ch_names.index(old_name)
+
+            if new_coords is not None:
+                montage.dig[idx + 3]["r"] = new_coords
+            montage.ch_names[idx] = new_name
+
+    edit_montage_dig(montage_copy, "P9", "T9", coords_t9)
+    edit_montage_dig(montage_copy, "P10", "T10", coords_t10)
+    edit_montage_dig(montage_copy, "Fpz", "FPz")
+
+    update_info = [
+        {"name": "Fp1", "order": 22},
+        {"name": "FPz", "order": 23},
+        {"name": "Fp2", "order": 24},
+        {"name": "AF7", "order": 25},
+        {"name": "AF3", "order": 26},
+        {"name": "AFz", "order": 27},
+        {"name": "AF4", "order": 28},
+        {"name": "AF8", "order": 29},
+        {"name": "F7", "order": 30},
+        {"name": "F5", "order": 31},
+        {"name": "F3", "order": 32},
+        {"name": "F1", "order": 33},
+        {"name": "Fz", "order": 34},
+        {"name": "F2", "order": 35},
+        {"name": "F4", "order": 36},
+        {"name": "F6", "order": 37},
+        {"name": "F8", "order": 38},
+        {"name": "FT7", "order": 39},
+        {"name": "FC5", "order": 1},
+        {"name": "FC3", "order": 2},
+        {"name": "FC1", "order": 3},
+        {"name": "FCz", "order": 4},
+        {"name": "FC2", "order": 5},
+        {"name": "FC4", "order": 6},
+        {"name": "FC6", "order": 7},
+        {"name": "FT8", "order": 8},
+        {"name": "T9", "order": 43},
+        {"name": "T7", "order": 41},
+        {"name": "C5", "order": 8},
+        {"name": "C3", "order": 9},
+        {"name": "C1", "order": 10},
+        {"name": "Cz", "order": 11},
+        {"name": "C2", "order": 12},
+        {"name": "C4", "order": 13},
+        {"name": "C6", "order": 14},
+        {"name": "T8", "order": 42},
+        {"name": "T10", "order": 44},
+        {"name": "TP7", "order": 45},
+        {"name": "CP5", "order": 15},
+        {"name": "CP3", "order": 16},
+        {"name": "CP1", "order": 17},
+        {"name": "CPz", "order": 18},
+        {"name": "CP2", "order": 19},
+        {"name": "CP4", "order": 20},
+        {"name": "CP6", "order": 21},
+        {"name": "TP8", "order": 46},
+        {"name": "P7", "order": 47},
+        {"name": "P5", "order": 48},
+        {"name": "P3", "order": 49},
+        {"name": "P1", "order": 50},
+        {"name": "Pz", "order": 51},
+        {"name": "P2", "order": 52},
+        {"name": "P4", "order": 53},
+        {"name": "P6", "order": 54},
+        {"name": "P8", "order": 55},
+        {"name": "PO7", "order": 56},
+        {"name": "PO3", "order": 57},
+        {"name": "POz", "order": 58},
+        {"name": "PO4", "order": 59},
+        {"name": "PO8", "order": 60},
+        {"name": "O1", "order": 61},
+        {"name": "Oz", "order": 62},
+        {"name": "O2", "order": 63},
+        {"name": "Iz", "order": 64},
+    ]
+
+    def update_montage_points_with_offset(montage, update_info, offset=3) -> None:
+        for item in update_info:
+            name = item["name"]
+            order = item["order"] - 1 + offset
+
+            if order < 0 or order >= len(montage.dig):
+                raise IndexError(f"Порядковый номер {order} выходит за пределы dig")
+
+            if name not in montage.ch_names:
+                montage.ch_names.append(name)
+            else:
+                idx = montage.ch_names.index(name)
+                montage.ch_names[idx] = name
+
+    update_montage_points_with_offset(montage_copy, update_info)
+
+    for raw_list_by_runs in eeg_raw_list.values():
+        for raw in raw_list_by_runs.values():
+            raw.set_montage(montage_copy)
+
+    first_raw = next(iter(next(iter(eeg_raw_list.values())).values()))
+
+    n_channels = len(first_raw.info["ch_names"])
+
+    events, event_id = mne.events_from_annotations(first_raw)
+    tmin, tmax = -0.5, 1.5
+    epochs = mne.Epochs(raw, events, event_id, tmin, tmax, baseline=(None, 0), preload=True)
+
+    n_times = epochs.get_data().shape[2]
+
+    event_types = sorted({event for runs in eeg_raw_list.values() for raw in runs.values() for event in raw.annotations.description})
+    n_events = len(event_types)
+
+    eeg_data_tensor = []
+
+    event_to_index = {event: idx for idx, event in enumerate(event_types)}
+
+    for subject_idx, runs_dict in eeg_raw_list.items():
+        subject_data = []
+
+        for run_idx, raw in runs_dict.items():
+            events, event_id = mne.events_from_annotations(raw)
+            tmin, tmax = -0.5, 1.5
+            epochs = mne.Epochs(raw, events, event_id, tmin, tmax, baseline=(None, 0), preload=True)
+
+            run_data = np.zeros((n_events, len(epochs), n_channels, n_times))
+
+            for event_name, event_code in event_id.items():
+                if event_name in event_types:
+                    event_idx = event_to_index[event_name]
+                    event_epochs = epochs[event_name].get_data()
+
+                    run_data[event_idx, : event_epochs.shape[0], :, :] = event_epochs
+
+            subject_data.append(run_data)
+
+        eeg_data_tensor.append(subject_data)
+
+    return np.array(eeg_data_tensor, dtype=np.float64)
