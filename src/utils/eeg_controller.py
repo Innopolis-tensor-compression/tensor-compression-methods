@@ -62,7 +62,10 @@ def download_mat_file(mat_url: str, cache_dir=None):
         total_size = int(response.headers.get("content-length", 0))
         block_size = 1024
 
-        with tqdm(total=total_size, unit="iB", unit_scale=True) as progress_bar, cache_mat_path.open("wb") as file:
+        with (
+            tqdm(total=total_size, unit="iB", unit_scale=True) as progress_bar,
+            cache_mat_path.open("wb") as file,
+        ):
             for data in response.iter_content(block_size):
                 progress_bar.update(len(data))
                 file.write(data)
@@ -99,7 +102,12 @@ def get_eegbci_dataset(cache_dir_eeg: str):
         for run_idx, f in enumerate(raw_fnames, start=3):
             raw = mne.io.read_raw_edf(f, preload=True)
 
-            raw.rename_channels({ch: ch.replace(".", "").upper().replace("Z", "z").replace("FP1", "Fp1").replace("FP2", "Fp2") for ch in raw.ch_names})
+            raw.rename_channels(
+                {
+                    ch: ch.replace(".", "").upper().replace("Z", "z").replace("FP1", "Fp1").replace("FP2", "Fp2")
+                    for ch in raw.ch_names
+                }
+            )
 
             eeg_raw_list[subject][run_idx] = raw
 
@@ -207,34 +215,67 @@ def get_eegbci_dataset(cache_dir_eeg: str):
         for raw in raw_list_by_runs.values():
             raw.set_montage(montage_copy)
 
+    desired_annotations = ["T1", "T2"]  # Указываем нужные аннотации
+    tmin, tmax = -4.0, 4.0
+    baseline = (0.0, 0.0)
+
     first_raw = next(iter(next(iter(eeg_raw_list.values())).values()))
 
     n_channels = len(first_raw.info["ch_names"])
 
     events, event_id = mne.events_from_annotations(first_raw)
-    tmin, tmax = -0.5, 1.5
-    epochs = mne.Epochs(raw, events, event_id, tmin, tmax, baseline=(None, 0), preload=True)
+    filtered_event_id = {key: value for key, value in event_id.items() if key in desired_annotations}
+    epochs = mne.Epochs(
+        first_raw,
+        events,
+        filtered_event_id,
+        tmin,
+        tmax,
+        baseline=baseline,
+        preload=True,
+    )
 
     n_times = epochs.get_data().shape[2]
 
-    event_types = sorted({event for runs in eeg_raw_list.values() for raw in runs.values() for event in raw.annotations.description})
+    event_types = sorted(desired_annotations)
     n_events = len(event_types)
 
     eeg_data_tensor = []
-
     event_to_index = {event: idx for idx, event in enumerate(event_types)}
+
+    total_epochs = 0
 
     for subject_idx, runs_dict in eeg_raw_list.items():
         subject_data = []
 
         for run_idx, raw in runs_dict.items():
             events, event_id = mne.events_from_annotations(raw)
-            tmin, tmax = -0.5, 1.5
-            epochs = mne.Epochs(raw, events, event_id, tmin, tmax, baseline=(None, 0), preload=True)
+            filtered_event_id = {key: value for key, value in event_id.items() if key in desired_annotations}
+
+            if not filtered_event_id:
+                print(f"Subject {subject_idx}, Run {run_idx}: No desired annotations found")
+                continue
+
+            epochs = mne.Epochs(
+                raw,
+                events,
+                filtered_event_id,
+                tmin,
+                tmax,
+                baseline=baseline,
+                preload=True,
+            )
+
+            num_epochs = len(epochs)
+            total_epochs += num_epochs
+            print(
+                f"Subject {subject_idx}, Run {run_idx}: {num_epochs} epochs for {list(filtered_event_id.keys())}",
+                end="\n\n",
+            )
 
             run_data = np.zeros((n_events, len(epochs), n_channels, n_times))
 
-            for event_name, event_code in event_id.items():
+            for event_name, event_code in filtered_event_id.items():
                 if event_name in event_types:
                     event_idx = event_to_index[event_name]
                     event_epochs = epochs[event_name].get_data()
@@ -245,4 +286,48 @@ def get_eegbci_dataset(cache_dir_eeg: str):
 
         eeg_data_tensor.append(subject_data)
 
-    return np.array(eeg_data_tensor, dtype=np.float64)
+    return np.array(eeg_data_tensor, dtype=np.float32)
+
+
+def create_eeg_limo_data_tensor(cache_dir_eeg: str):
+    limo_raw_list = {}
+    subjects = list(range(2, 5))
+
+    for subject in subjects:
+        limo_raw_list[subject] = mne.datasets.limo.load_data(path=cache_dir_eeg, subject=subject)
+
+    # Список типов событий
+    event_types = sorted({event for epochs in limo_raw_list.values() for event in epochs.event_id})
+
+    # Создаём маппинг событий на индексы
+    event_to_index = {event: idx for idx, event in enumerate(event_types)}
+
+    # Определяем минимальное количество эпох среди всех субъектов
+    min_epochs = min(len(epochs.get_data()) for epochs in limo_raw_list.values())
+    n_channels = len(next(iter(limo_raw_list.values())).info["ch_names"])
+    n_times = next(iter(limo_raw_list.values())).get_data().shape[2]
+
+    eeg_limo_data_tensor = []  # Список данных для всех субъектов
+
+    # Создание данных для каждого субъекта
+    for subject_idx, epochs in limo_raw_list.items():
+        epoch_objs = epochs.get_data()[:min_epochs]  # Убираем лишние эпохи
+        run_data = np.zeros(
+            (min_epochs, len(event_types), n_channels, n_times),
+            dtype=np.float32,
+        )
+
+        # Заполняем тензор по событиям
+        for event_name, event_code in epochs.event_id.items():
+            if event_name in event_types:
+                event_idx = event_to_index[event_name]
+
+                # Заполняем данные для всех эпох
+                for epoch_idx, epoch_data in enumerate(epoch_objs):
+                    run_data[epoch_idx, event_idx, :, :] = epoch_data
+
+        eeg_limo_data_tensor.append(run_data)
+
+    # Преобразуем в numpy массив и возвращаем
+    eeg_limo_data_tensor = np.array(eeg_limo_data_tensor, dtype=np.float32)
+    return eeg_limo_data_tensor
