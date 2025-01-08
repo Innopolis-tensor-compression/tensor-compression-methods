@@ -242,7 +242,7 @@ def find_optimal_rank_tensor_train_by_compression_ratio(
 
     from src.utils.metrics_calculators import IMetricCalculator
 
-    def check_memory_availability() -> None:
+    def check_memory_availability(tensor_cuda: tl.tensor) -> None:
         """Check if there is sufficient RAM available."""
         if psutil.virtual_memory().available < 2 * tensor_cuda.element_size() * tensor_cuda.numel():
             raise MemoryError("Insufficient RAM available to process this tensor.")  # noqa: EM101
@@ -282,7 +282,7 @@ def find_optimal_rank_tensor_train_by_compression_ratio(
 
             for test_rank in candidates:
                 try:
-                    check_memory_availability()
+                    check_memory_availability(tensor_cuda)
 
                     method_result = tl.decomposition.tensor_train(tensor_cuda, rank=test_rank, **tensor_train_args)
                     tt_factors = method_result
