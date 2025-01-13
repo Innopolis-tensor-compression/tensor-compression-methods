@@ -242,5 +242,6 @@ fabric.properties
 # other
 /docs/tasks.md
 /experiments/data
+/experiments/IPIP-NEO_data_repository/data
 .cache/
 .qodo/
