@@ -1,6 +1,12 @@
+import gc
 from typing import Any
 
 import numpy as np
+import psutil
+import tensorly as tl
+import torch
+
+from src.utils.metrics_calculators import IMetricCalculator
 
 
 def find_optimal_rank_tucker_by_frobenius_error(
@@ -19,13 +25,6 @@ def find_optimal_rank_tucker_by_frobenius_error(
     :param search_strategy: Search strategy ("binary" or "incremental").
     :return: Optimal rank, minimum Frobenius error, compression ratio, and iteration logs.
     """
-    import gc
-
-    import tensorly as tl
-    import torch
-
-    from src.utils.metrics_calculators import IMetricCalculator
-
     if search_strategy not in ["binary", "incremental"]:
         raise ValueError("Invalid search strategy. Use 'binary' or 'incremental'.")  # noqa: EM101
 
@@ -131,13 +130,6 @@ def find_optimal_rank_tucker_by_compression_ratio(
     :param search_strategy: Search strategy ("binary" or "incremental").
     :return: Optimal rank, compression ratio, Frobenius error, and iteration logs.
     """
-    import gc
-
-    import tensorly as tl
-    import torch
-
-    from src.utils.metrics_calculators import IMetricCalculator
-
     if search_strategy not in ["binary", "incremental"]:
         raise ValueError("Invalid search strategy. Use 'binary' or 'incremental'.")  # noqa: EM101
 
@@ -234,14 +226,6 @@ def find_optimal_rank_tensor_train_by_compression_ratio(
     tensor_train_args: dict | None = None,
     search_strategy: str = "custom",
 ):
-    import gc
-
-    import psutil
-    import tensorly as tl
-    import torch
-
-    from src.utils.metrics_calculators import IMetricCalculator
-
     def check_memory_availability(tensor_cuda: tl.tensor) -> None:
         """Check if there is sufficient RAM available."""
         if psutil.virtual_memory().available < 2 * tensor_cuda.element_size() * tensor_cuda.numel():
@@ -251,34 +235,44 @@ def find_optimal_rank_tensor_train_by_compression_ratio(
         raise ValueError("Invalid search strategy. Currently only 'custom' is supported.")  # noqa: EM101
 
     if tensor_train_args is None:
-        tensor_train_args = {"svd": "randomized_svd"}
+        tensor_train_args = {"svd": "truncated_svd"}
 
     tensor_compression_logs = []
     tensor_shape = tensor.shape
     initial_rank = [1] * (len(tensor_shape) + 1)
 
-    search_index = -1
-    best_rank, best_compression, best_error = None, None, None
-    current_compression_ratio = 0.0
+    best_rank = initial_rank.copy()
+    best_compression = 0.0
+    best_error = float("inf")
+
+    fixed_dimensions = set()
 
     print("Optimal rank search process for TensorTrain:")
-    print("iteration number | rank | compression ratio (%) | frobenius error (%)")
+    print("step | rank | compression ratio (%) | frobenius error (%)")
 
     with tl.backend_context("pytorch"):
         tensor_cuda = tl.tensor(tensor).to("cuda")
 
-        while current_compression_ratio < target_compression_ratio:
+        step = 0
+        while True:
+            step += 1
             candidates = []
-            next_best_rank = None
-            next_best_compression = None
-            next_best_error = float("inf")
 
+            current_best_rank = None
+            current_best_compression = 0.0
+            current_best_error = float("inf")
+
+            secondary_best_rank = None
+            secondary_best_compression = 0.0
+            secondary_best_error = float("inf")
+
+            # Generate candidates by adding 1 to each dimension's rank, excluding fixed dimensions
             for dim in range(1, len(tensor_shape)):
-                step_sizes = [1, 2, 5, 10]
-                for step in step_sizes:
-                    new_rank = initial_rank.copy()
-                    new_rank[dim] += step
-                    candidates.append(new_rank)
+                if dim in fixed_dimensions:
+                    continue
+                new_rank = best_rank.copy()
+                new_rank[dim] += 1
+                candidates.append(new_rank)
 
             for test_rank in candidates:
                 try:
@@ -297,45 +291,59 @@ def find_optimal_rank_tensor_train_by_compression_ratio(
                         / IMetricCalculator.get_tensors_size(tensor_cuda)
                     )
 
-                    if compression_ratio > current_compression_ratio and frobenius_error < next_best_error:
-                        next_best_rank = test_rank.copy()
-                        next_best_compression = compression_ratio
-                        next_best_error = frobenius_error
-                        current_compression_ratio = compression_ratio
+                    # Primary priority: minimize error and increase compression
+                    if compression_ratio > current_best_compression and frobenius_error < current_best_error:
+                        current_best_rank = test_rank.copy()
+                        current_best_compression = compression_ratio
+                        current_best_error = frobenius_error
+
+                    # Secondary priority: increase compression even if error grows
+                    elif compression_ratio > secondary_best_compression and frobenius_error >= current_best_error:
+                        secondary_best_rank = test_rank.copy()
+                        secondary_best_compression = compression_ratio
+                        secondary_best_error = frobenius_error
+
+                    # Check if this dimension should be fixed
+                    if compression_ratio == best_compression:
+                        for dim in range(1, len(test_rank)):
+                            if test_rank[dim] > best_rank[dim]:
+                                fixed_dimensions.add(dim)
 
                     del tt_factors, reconstructed_tensor
                 except MemoryError as mem_err:
                     print(f"MemoryError: {mem_err}. Skipping current tensor.")
-                    best_rank = initial_rank
-                    break
                 except Exception as e:
                     print(f"Error for rank {test_rank}: {e}")
                 finally:
                     torch.cuda.empty_cache()
                     gc.collect()
 
-            if next_best_rank is None or best_rank is not None:
-                print("Stopping: no further improvements possible or memory issue encountered.")
+            # Choose the best candidate based on priorities
+            if current_best_rank is not None:
+                best_rank = current_best_rank.copy()
+                best_compression = current_best_compression
+                best_error = current_best_error
+            elif secondary_best_rank is not None:
+                best_rank = secondary_best_rank.copy()
+                best_compression = secondary_best_compression
+                best_error = secondary_best_error
+            else:
+                print("Stopping: No further improvements or all candidates exceed compression ratio.")
                 break
 
-            initial_rank = next_best_rank
-            best_rank, best_compression, best_error = (
-                initial_rank,
-                next_best_compression,
-                next_best_error,
+            print(f"{step} | {best_rank} | {best_compression:.6f} % | {best_error:.6f} %")
+
+            tensor_compression_logs.append(
+                {
+                    "rank": best_rank.copy(),
+                    "compression_ratio": best_compression,
+                    "frobenius_error": best_error,
+                }
             )
 
-            search_index += 1
-            if best_compression is not None and best_error is not None:
-                tensor_compression_logs.append(
-                    {
-                        "rank": best_rank.copy(),
-                        "compression_ratio": best_compression,
-                        "frobenius_error": best_error,
-                    }
-                )
-                print(f"{search_index} | {best_rank} | {best_compression:.6f} % | {best_error:.6f} %")
-            else:
-                print(f"{search_index} | {best_rank} | No valid compression or error values.")
+            if best_compression > target_compression_ratio:  # Compression limit met
+                print("Target compression ratio reached. Stopping search.")
+                break
 
+    print(f"Optimal rank: {best_rank}, Compression: {best_compression}%, Error: {best_error}%")
     return best_rank, best_compression, best_error, tensor_compression_logs
