@@ -49,6 +49,7 @@ dev-dependencies = [
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["experiments/"]
 
 [tool.ruff.lint]
 select = ["ALL"]
