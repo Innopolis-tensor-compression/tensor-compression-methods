@@ -224,12 +224,46 @@ def find_optimal_rank_tensor_train_by_compression_ratio(
     tensor: np.array,
     target_compression_ratio: float,
     tensor_train_args: dict | None = None,
+    initial_rank_arg: list | None = None,
     search_strategy: str = "custom",
 ):
     def check_memory_availability(tensor_cuda: tl.tensor) -> None:
         """Check if there is sufficient RAM available."""
         if psutil.virtual_memory().available < 2 * tensor_cuda.element_size() * tensor_cuda.numel():
             raise MemoryError("Insufficient RAM available to process this tensor.")  # noqa: EM101
+
+    def calculate_tt_bounds(shape: tuple | list) -> list:
+        """
+        Calculates the bounds for TT-ranks of a tensor based on its shape.
+
+        Parameters
+        ----------
+        shape : tuple or list
+            List or tuple of tensor dimensions. Each element represents the size of the tensor along that dimension.
+
+        Returns
+        -------
+        list
+            List of rank bounds in the format [(1, 1), (1, r1_max), ..., (1, 1)].
+
+        """
+        d = len(shape)
+        bounds = [(1, 1)]
+
+        for k in range(1, d):
+            prod_left = 1
+            for i in range(k):
+                prod_left *= shape[i]
+
+            prod_right = 1
+            for j in range(k, d):
+                prod_right *= shape[j]
+
+            rk_max = min(prod_left, prod_right)
+            bounds.append((1, rk_max))
+
+        bounds.append((1, 1))
+        return bounds
 
     if search_strategy not in ["custom"]:
         raise ValueError("Invalid search strategy. Currently only 'custom' is supported.")  # noqa: EM101
@@ -239,7 +273,12 @@ def find_optimal_rank_tensor_train_by_compression_ratio(
 
     tensor_compression_logs = []
     tensor_shape = tensor.shape
-    initial_rank = [1] * (len(tensor_shape) + 1)
+    initial_rank: list[int] = [1] * (len(tensor_shape) + 1) if initial_rank_arg is None else initial_rank_arg
+
+    if len(initial_rank) != len(tensor_shape) + 1:
+        raise ValueError(
+            f"Length of initial rank must be equal to length of tensor shape plus 1. Length of initial rank is {len(initial_rank)} and length of tensor shape is {len(tensor_shape)}"
+        )
 
     best_rank = initial_rank.copy()
     best_compression = 0.0
