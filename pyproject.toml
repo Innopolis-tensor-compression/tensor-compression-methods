@@ -37,6 +37,23 @@ dependencies = [
     "yt-dlp>=2024.9.27",
 ]
 
+[tool.mypy]
+python_version = 3.11
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+disallow_untyped_calls = true
+disallow_untyped_definitions = true
+exclude = [
+    "^experiments\\.ipynb$",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "src.model_compressor.model_compressor",
+]
+ignore_errors = true
+
 [tool.uv]
 dev-dependencies = [
     "mypy>=1.11.2",
@@ -49,7 +66,10 @@ dev-dependencies = [
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["experiments/"]
+extend-exclude = [
+    "experiments/",
+    "src/model_compressor/model_compressor.py"
+]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -59,13 +79,13 @@ extend-ignore = [
     "ANN", # flake8-annotations
     "COM", # flake8-commas
     "C90", # mccabe complexity
-    "DJ",  # django
+    "DJ", # django
     "EXE", # flake8-executable
     "T10", # debugger
     "TID", # flake8-tidy-imports
 
     #### specific rules
-    "D100",   # ignore missing docs
+    "D100", # ignore missing docs
     "D101",
     "D102",
     "D103",
@@ -89,9 +109,9 @@ extend-ignore = [
     "B018", # Found useless expression. Either assign it to a variable or remove it
     "PLR0912", # Too many branches
     "PLR0915", # Too many statements
-    "T201",  # `print` found
+    "T201", # `print` found
     "ERA001",
-    "RUF001",  # RUF001 String contains ambiguous `е` (CYRILLIC SMALL LETTER IE). Did you mean `e` (LATIN SMALL LETTER E)?
+    "RUF001", # RUF001 String contains ambiguous `е` (CYRILLIC SMALL LETTER IE). Did you mean `e` (LATIN SMALL LETTER E)?
     "RUF003",
     "RET504",
     "T203",
@@ -104,7 +124,7 @@ extend-ignore = [
     "RUF002",
     "NPY002",
     "PERF102", # PERF102 When using only the keys of a dict use the `keys()` method
-    "B007",  # B007 Loop control variable `some name` not used within loop body
+    "B007", # B007 Loop control variable `some name` not used within loop body
     "N816", # N816 Variable in global scope should not be mixedCase
     "E501",
     "BLE001"

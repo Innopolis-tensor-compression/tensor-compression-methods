@@ -1,22 +1,24 @@
 """
 This module contains functions for compressing entire module and Conv2d, ConvTranspose2d, Linear layers.
 """
+
+import time
 from warnings import warn
-from torch import float32, tensordot, device
-from torch.nn import Linear, Conv2d, ConvTranspose2d, Sequential, Module
-from torch.optim import Optimizer
+
+from tensorly import set_backend
+from tensorly.decomposition import parafac, tucker
+from torch import device, float32, tensordot
+from torch.nn import Conv2d, ConvTranspose2d, Linear, Module, Sequential
 from torch.nn.modules.loss import _Loss
 from torch.nn.parameter import Parameter
-from tensorly.decomposition import parafac, tucker
-from tensorly import set_backend
+from torch.optim import Optimizer
+
+from src.model_compressor.calculate_optimized_rank import global_optimize_tucker_rank
 
 set_backend("pytorch")
 
 
-def svd_conv2d(
-        conv_layer: Conv2d,
-        rank_cpd: int = None
-) -> Sequential:
+def svd_conv2d(conv_layer: Conv2d, rank_cpd: int = None) -> Sequential:
     """
     Compresses Conv2d layer with kernel size of (1, 1) using SVD decomposition.
 
@@ -26,8 +28,8 @@ def svd_conv2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
-    """
 
+    """
     # Params of source conv_layer
     out_channels = conv_layer.out_channels
     in_channels = conv_layer.in_channels
@@ -58,11 +60,7 @@ def svd_conv2d(
     return Sequential(conv1, conv2)
 
 
-def cpd_conv2d(
-        conv_layer: Conv2d,
-        rank_cpd: int = None,
-        rank_tkd: list[int] | tuple[int, int] = None
-) -> Sequential:
+def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | tuple[int, int] = None) -> Sequential:
     """
     Compresses Conv2d layer using CPD decomposition.
 
@@ -73,6 +71,7 @@ def cpd_conv2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
+
     """
     if conv_layer.kernel_size == (1, 1):
         return svd_conv2d(conv_layer, rank_cpd)
@@ -86,9 +85,7 @@ def cpd_conv2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels,
-                                            out_channels,
-                                            kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != float32:
@@ -103,15 +100,22 @@ def cpd_conv2d(
 
     # Reshape factors to fit Conv2d layer
     factor_cpd_input = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
-    factor_cpd_hidden = (factors_cpd[2].permute([1, 0])
-                         .unsqueeze(1).reshape(rank_cpd, 1, kernel_size_x, kernel_size_y))
+    factor_cpd_hidden = factors_cpd[2].permute([1, 0]).unsqueeze(1).reshape(rank_cpd, 1, kernel_size_x, kernel_size_y)
     factor_cpd_output = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
     conv1_cpd = Conv2d(in_channels, rank_cpd, 1, dtype=float32, bias=bias)
-    conv2_cpd = Conv2d(rank_cpd, rank_cpd, (kernel_size_x, kernel_size_y),
-                       groups=rank_cpd, stride=stride, padding=padding, dilation=dilation,
-                       dtype=float32, bias=bias)
+    conv2_cpd = Conv2d(
+        rank_cpd,
+        rank_cpd,
+        (kernel_size_x, kernel_size_y),
+        groups=rank_cpd,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        dtype=float32,
+        bias=bias,
+    )
     conv3_cpd = Conv2d(rank_cpd, out_channels, 1, dtype=float32, bias=bias)
     conv1_cpd.weight = Parameter(factor_cpd_input)
     conv2_cpd.weight = Parameter(factor_cpd_hidden)
@@ -120,11 +124,7 @@ def cpd_conv2d(
     return Sequential(conv1_cpd, conv2_cpd, conv3_cpd)
 
 
-def tkd_conv2d(
-        conv_layer: Conv2d,
-        rank_cpd: int = None,
-        rank_tkd: list[int] | tuple[int, int] = None
-) -> Sequential:
+def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | tuple[int, int] = None) -> Sequential:
     """
     Compresses Conv2d layer using Tucker decomposition.
 
@@ -135,6 +135,7 @@ def tkd_conv2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
+
     """
     if conv_layer.kernel_size == (1, 1):
         return svd_conv2d(conv_layer, min(rank_tkd))
@@ -148,9 +149,7 @@ def tkd_conv2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels,
-                                            out_channels,
-                                            kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != float32:
@@ -172,15 +171,25 @@ def tkd_conv2d(
 
     # Reshape factors to fit Conv2d layer
     factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
-    factor_tkd_hidden = (tensordot(factors_tkd[2], core_tkd, dims=([1], [2])).permute([1, 2, 0])
-                         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y))
+    factor_tkd_hidden = (
+        tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
+        .permute([1, 2, 0])
+        .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
+    )
     factor_tkd_output = factors_tkd[0].unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
     conv1_tkd = Conv2d(in_channels, rank_tkd[1], 1, dtype=float32, bias=bias)
-    conv2_tkd = Conv2d(rank_tkd[1], rank_tkd[0], (kernel_size_x, kernel_size_y),
-                       stride=stride, padding=padding, dilation=dilation,
-                       dtype=float32, bias=bias)
+    conv2_tkd = Conv2d(
+        rank_tkd[1],
+        rank_tkd[0],
+        (kernel_size_x, kernel_size_y),
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        dtype=float32,
+        bias=bias,
+    )
     conv3_tkd = Conv2d(rank_tkd[0], out_channels, 1, dtype=float32, bias=bias)
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
@@ -190,9 +199,7 @@ def tkd_conv2d(
 
 
 def tkd_cpd_conv2d(
-        conv_layer: Conv2d,
-        rank_cpd: int = None,
-        rank_tkd: list[int] | tuple[int, int] = None
+    conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | tuple[int, int] = None
 ) -> Sequential:
     """
     Compresses Conv2d layer using combination of Tucker decomposition and CPD decomposition.
@@ -204,6 +211,7 @@ def tkd_cpd_conv2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
+
     """
     if conv_layer.kernel_size == (1, 1):
         return svd_conv2d(conv_layer, rank_cpd)
@@ -217,9 +225,7 @@ def tkd_cpd_conv2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels,
-                                            out_channels,
-                                            kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != float32:
@@ -241,14 +247,24 @@ def tkd_cpd_conv2d(
 
     # Reshape factors to fit Conv2d layer
     factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
-    factor_tkd_hidden = (tensordot(factors_tkd[2], core_tkd, dims=([1], [2])).permute([1, 2, 0])
-                         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y))
+    factor_tkd_hidden = (
+        tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
+        .permute([1, 2, 0])
+        .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
+    )
     factor_tkd_output = factors_tkd[0].unsqueeze(2).unsqueeze(3)
 
     # CPD decomposition of middle Conv2d
-    conv2_tkd = Conv2d(rank_tkd[0], rank_tkd[1], (kernel_size_x, kernel_size_y),
-                       stride=stride, padding=padding, dilation=dilation,
-                       dtype=float32, bias=bias)
+    conv2_tkd = Conv2d(
+        rank_tkd[0],
+        rank_tkd[1],
+        (kernel_size_x, kernel_size_y),
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        dtype=float32,
+        bias=bias,
+    )
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv2_tkd = cpd_conv2d(conv2_tkd, rank_cpd=rank_cpd)
 
@@ -262,10 +278,7 @@ def tkd_cpd_conv2d(
 
 
 # TODO Check if correct for ConvTranspose2d
-def svd_conv_transpose2d(
-        conv_layer: ConvTranspose2d,
-        rank_cpd: int = None
-) -> Sequential:
+def svd_conv_transpose2d(conv_layer: ConvTranspose2d, rank_cpd: int = None) -> Sequential:
     """
     Compresses ConvTranspose2d layer with kernel size of (1, 1) using SVD decomposition.
 
@@ -275,8 +288,8 @@ def svd_conv_transpose2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
-    """
 
+    """
     # Params of source conv_layer
     out_channels = conv_layer.out_channels
     in_channels = conv_layer.in_channels
@@ -309,9 +322,7 @@ def svd_conv_transpose2d(
 
 
 def cpd_conv_transpose2d(
-        conv_layer: ConvTranspose2d,
-        rank_cpd: int = None,
-        rank_tkd: list[int] | tuple[int, int] = None
+    conv_layer: ConvTranspose2d, rank_cpd: int = None, rank_tkd: list[int] | tuple[int, int] = None
 ) -> Sequential:
     """
     Compresses ConvTranspose2d layer using CPD decomposition.
@@ -323,6 +334,7 @@ def cpd_conv_transpose2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
+
     """
     if conv_layer.kernel_size == (1, 1):
         return svd_conv_transpose2d(conv_layer, rank_cpd)
@@ -336,9 +348,7 @@ def cpd_conv_transpose2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels,
-                                            out_channels,
-                                            kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != float32:
@@ -357,15 +367,22 @@ def cpd_conv_transpose2d(
 
     # Reshape factors to fit ConvTranspose2d layer
     factor_cpd_input = factors_cpd[0].unsqueeze(2).unsqueeze(3)
-    factor_cpd_hidden = (factors_cpd[2].permute([1, 0])
-                         .unsqueeze(1).reshape(rank_cpd, 1, kernel_size_x, kernel_size_y))
+    factor_cpd_hidden = factors_cpd[2].permute([1, 0]).unsqueeze(1).reshape(rank_cpd, 1, kernel_size_x, kernel_size_y)
     factor_cpd_output = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
 
     # Create compressed ConvTranspose2d layer
     conv1_cpd = ConvTranspose2d(in_channels, rank_cpd, 1, dtype=float32, bias=bias)
-    conv2_cpd = ConvTranspose2d(rank_cpd, rank_cpd, (kernel_size_x, kernel_size_y),
-                                groups=rank_cpd, stride=stride, padding=padding, dilation=dilation,
-                                dtype=float32, bias=bias)
+    conv2_cpd = ConvTranspose2d(
+        rank_cpd,
+        rank_cpd,
+        (kernel_size_x, kernel_size_y),
+        groups=rank_cpd,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        dtype=float32,
+        bias=bias,
+    )
     conv3_cpd = ConvTranspose2d(rank_cpd, out_channels, 1, dtype=float32, bias=bias)
     conv1_cpd.weight = Parameter(factor_cpd_input)
     conv2_cpd.weight = Parameter(factor_cpd_hidden)
@@ -375,9 +392,7 @@ def cpd_conv_transpose2d(
 
 
 def tkd_conv_transpose2d(
-        conv_layer: ConvTranspose2d,
-        rank_cpd: int = None,
-        rank_tkd: list[int] | tuple[int, int] = None
+    conv_layer: ConvTranspose2d, rank_cpd: int = None, rank_tkd: list[int] | tuple[int, int] = None
 ) -> Sequential:
     """
     Compresses ConvTranspose2d layer using Tucker decomposition.
@@ -389,6 +404,7 @@ def tkd_conv_transpose2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
+
     """
     if conv_layer.kernel_size == (1, 1):
         return svd_conv_transpose2d(conv_layer, min(rank_tkd))
@@ -402,9 +418,7 @@ def tkd_conv_transpose2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels,
-                                            out_channels,
-                                            kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != float32:
@@ -427,15 +441,23 @@ def tkd_conv_transpose2d(
 
     # Reshape factors to fit ConvTranspose2d layer
     factor_tkd_input = factors_tkd[0].unsqueeze(2).unsqueeze(3)
-    factor_tkd_hidden = (tensordot(core_tkd, factors_tkd[2], dims=([2], [1]))
-                         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y))
+    factor_tkd_hidden = tensordot(core_tkd, factors_tkd[2], dims=([2], [1])).reshape(
+        rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y
+    )
     factor_tkd_output = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
 
     # Create compressed ConvTranspose2d layer
     conv1_tkd = ConvTranspose2d(in_channels, rank_tkd[0], 1, dtype=float32, bias=bias)
-    conv2_tkd = ConvTranspose2d(rank_tkd[0], rank_tkd[1], (kernel_size_x, kernel_size_y),
-                                stride=stride, padding=padding, dilation=dilation,
-                                dtype=float32, bias=bias)
+    conv2_tkd = ConvTranspose2d(
+        rank_tkd[0],
+        rank_tkd[1],
+        (kernel_size_x, kernel_size_y),
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        dtype=float32,
+        bias=bias,
+    )
     conv3_tkd = ConvTranspose2d(rank_tkd[1], out_channels, 1, dtype=float32, bias=bias)
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
@@ -445,9 +467,7 @@ def tkd_conv_transpose2d(
 
 
 def tkd_cpd_conv_transpose2d(
-        conv_layer: ConvTranspose2d,
-        rank_cpd: int = None,
-        rank_tkd: list[int] | tuple[int, int] = None
+    conv_layer: ConvTranspose2d, rank_cpd: int = None, rank_tkd: list[int] | tuple[int, int] = None
 ) -> Sequential:
     """
     Compresses ConvTranspose2d layer using combination of Tucker decomposition and CPD decomposition.
@@ -459,6 +479,7 @@ def tkd_cpd_conv_transpose2d(
 
     Returns:
         Sequential: Compressed ConvTranspose2d layer.
+
     """
     if conv_layer.kernel_size == (1, 1):
         return svd_conv_transpose2d(conv_layer, rank_cpd)
@@ -472,9 +493,7 @@ def tkd_cpd_conv_transpose2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels,
-                                            out_channels,
-                                            kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != float32:
@@ -496,14 +515,24 @@ def tkd_cpd_conv_transpose2d(
 
     # Reshape factors to fit ConvTranspose2d layer
     factor_tkd_input = factors_tkd[0].unsqueeze(2).unsqueeze(3)
-    factor_tkd_hidden = (tensordot(core_tkd, factors_tkd[2], dims=([2], [1])).permute([1, 2, 0])
-                         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y))
+    factor_tkd_hidden = (
+        tensordot(core_tkd, factors_tkd[2], dims=([2], [1]))
+        .permute([1, 2, 0])
+        .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
+    )
     factor_tkd_output = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
 
     # CPD decomposition of middle ConvTranspose2d
-    conv2_tkd = ConvTranspose2d(rank_tkd[0], rank_tkd[1], (kernel_size_x, kernel_size_y),
-                                stride=stride, padding=padding, dilation=dilation,
-                                dtype=float32, bias=bias)
+    conv2_tkd = ConvTranspose2d(
+        rank_tkd[0],
+        rank_tkd[1],
+        (kernel_size_x, kernel_size_y),
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        dtype=float32,
+        bias=bias,
+    )
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv2_tkd = cpd_conv_transpose2d(conv2_tkd, rank_cpd=rank_cpd)
 
@@ -526,6 +555,7 @@ def __get_last_layer(model: Module):
     Returns:
         str: Name of the last layer.
         Module: Last layer of the model.
+
     """
     last_name, last_layer = None, None
     for name, layer in model.named_modules():
@@ -535,22 +565,22 @@ def __get_last_layer(model: Module):
 
 
 def compress_model(
-        model: Module,
-        layers: list[type[Conv2d | ConvTranspose2d | Linear]] = None,
-        conv_compression_method: str = "TKDCPD",
-        conv_transpose_compression_method: str = "TKDCPD",
-        linear_compress_method: str = "None",
-        target_compression_ratio: float = 50.0,
-        frobenius_error_coef: float = 1.0,
-        compression_ratio_coef: float = 10.0,
-        rank_cpd: int = None,
-        rank_tkd: list[int] | tuple[int, int] = None,
-        finetune: bool = False,
-        optimizer: Optimizer = None,
-        lr: float = 10e-3,
-        loss_function: _Loss = None,
-        batch_size: int = 32,
-        finetune_device: device | str = "cpu"
+    model: Module,
+    layers: list[type[Conv2d | ConvTranspose2d | Linear]] = None,
+    conv_compression_method: str = "TKDCPD",
+    conv_transpose_compression_method: str = "TKDCPD",
+    linear_compress_method: str = "None",
+    target_compression_ratio: float = 50.0,
+    frobenius_error_coef: float = 1.0,
+    compression_ratio_coef: float = 10.0,
+    rank_cpd: int = None,
+    rank_tkd: list[int] | tuple[int, int] = None,
+    finetune: bool = False,
+    optimizer: Optimizer = None,
+    lr: float = 10e-3,
+    loss_function: _Loss = None,
+    batch_size: int = 32,
+    finetune_device: device | str = "cpu",
 ) -> None:
     """
     Compresses specified layers of the model using specified compression methods
@@ -575,6 +605,7 @@ def compress_model(
 
     Raises:
         ValueError: If an unknown compression method is specified.
+
     """
     if layers is None:
         layers = [Linear, Conv2d, ConvTranspose2d]
@@ -610,11 +641,30 @@ def compress_model(
     for name, child in model.named_children():
         if name == last_name and child == last_layer:
             continue
-        # TODO ABOBA
-        # tensor = child.weight.reshape(child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3])
-        # target_compression_ratio
-        # compression_ratio_coef
-        # frobenius_error_coef
+
+        # calculate optimized rank
+        tensor = child.weight.reshape(
+            child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
+        )
+
+        method = "differential_evolution"
+
+        try:
+            start_time = time.perf_counter()
+            reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                global_optimize_tucker_rank(
+                    optimization_method=method,
+                    tensor=tensor,
+                    target_compression_ratio=target_compression_ratio,
+                    frobenius_error_coef=frobenius_error_coef,
+                    compression_ratio_coef=compression_ratio_coef,
+                    verbose=True,
+                )
+            )
+            elapsed_time = time.perf_counter() - start_time
+        except Exception as e:
+            print(f"Error with method {method}: {e}")
+
         if isinstance(child, Conv2d) and Conv2d in layers:
             setattr(model, name, conv_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, ConvTranspose2d) and ConvTranspose2d in layers:
@@ -622,17 +672,15 @@ def compress_model(
         elif isinstance(child, Linear) and Linear in layers:
             warn("Linear compression is not implemented yet")
         else:
-            compress_model(child, layers, conv_compression_method,
-                           conv_transpose_compression_method,
-                           linear_compress_method, rank_cpd, rank_tkd)
+            compress_model(
+                child,
+                layers,
+                conv_compression_method,
+                conv_transpose_compression_method,
+                linear_compress_method,
+                rank_cpd,
+                rank_tkd,
+            )
 
     if finetune:
         warn("Fine-tuning is not implemented yet")
-
-def ratio(tensor, ranks: list[int] | tuple[int, int]) -> float:
-    """Returns the compression ratio of the tensor after TKD decomposition"""
-    size = tensor.shape
-    size1 = size[0] * ranks[0]
-    size2 = ranks[0] * ranks[1] * size[2] ** 2
-    size3 = size[1] * ranks[1]
-    return (size1 + size2 + size3) / (size[0] * size[1] * size[2] ** 2)
