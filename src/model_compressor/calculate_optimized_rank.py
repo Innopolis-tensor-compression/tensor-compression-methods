@@ -72,6 +72,7 @@ def loss_function_tucker(
         }
 
     try:
+        # TODO: закинуть tensor на нужный бэкенд
         weight, factors = tl.decomposition.tucker(tensor, rank=rank, **tucker_args)
         reconstructed_tensor = tl.tucker_to_tensor((weight, factors))
 
