@@ -72,7 +72,8 @@ def loss_function_tucker(
         }
 
     try:
-        # TODO: закинуть tensor на нужный бэкенд
+        if tl.get_backend() == "pytorch":
+            tensor = tl.tensor(tensor).to("cuda")
         weight, factors = tl.decomposition.tucker(tensor, rank=rank, **tucker_args)
         reconstructed_tensor = tl.tucker_to_tensor((weight, factors))
 
