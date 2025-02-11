@@ -1,4 +1,4 @@
-def calculate_tucker_bounds(shape: tuple | list) -> list:
+def calculate_tucker_bounds_for_layer_for_nn(shape: tuple | list) -> list:
     """
     Calculate the bounds for Tucker ranks of a tensor based on its shape.
 
@@ -13,16 +13,16 @@ def calculate_tucker_bounds(shape: tuple | list) -> list:
     list[tuple[int, int]]
         A list of rank bounds for the Tucker decomposition.
         Each element is a tuple (r_min, r_max), where:
-        - r_min is always 1.
+        - r_min is always 1 for all modes except the last.
         - r_max is the upper bound for the Tucker rank along the corresponding mode.
 
     Example
     -------
-    >>> res = calculate_tucker_bounds((3, 4, 5))
-    [(1, 3), (1, 4), (1, 5)]
+    >>> res = calculate_tucker_bounds_for_layer_for_nn((3, 4, 5))
+    [(1, 3), (1, 4), (5, 5)]
 
     """
-    return [(1, dim) for dim in shape]
+    return [(1, dim) for dim in shape[:-1]] + [(shape[-1], shape[-1])]
 
 
 def calculate_tt_bounds(shape: tuple | list) -> list:

@@ -5,7 +5,7 @@ import numpy as np
 import tensorly as tl
 from scipy.optimize import OptimizeResult, differential_evolution
 
-from src.model_compressor.calculate_bounds import calculate_tucker_bounds
+from src.model_compressor.calculate_bounds import calculate_tucker_bounds_for_layer_for_nn
 
 
 def compression_ratio_nn(tensor, ranks: list[int] | tuple[int, int]) -> float:
@@ -269,7 +269,11 @@ def global_optimize_tucker_rank(
         )
 
     # params
-    tucker_bounds = calculate_tucker_bounds(tensor.shape) if optimization_method in ["differential_evolution"] else None
+    tucker_bounds = (
+        calculate_tucker_bounds_for_layer_for_nn(tensor.shape)
+        if optimization_method in ["differential_evolution"]
+        else None
+    )
 
     callback_param = optimization_logger.callback if optimization_method not in [] or verbose is True else None
 
