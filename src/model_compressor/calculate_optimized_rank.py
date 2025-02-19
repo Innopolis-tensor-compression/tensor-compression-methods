@@ -198,7 +198,7 @@ def global_optimize_tucker_rank(
     if tucker_args is None:
         tucker_args = {
             "svd": "truncated_svd",
-            "init": "random",
+            "init": "svd",
             "random_state": 42,
         }
 
