@@ -67,7 +67,7 @@ def loss_function_tucker(
     if tucker_args is None:
         tucker_args = {
             "svd": "truncated_svd",
-            "init": "random",
+            "init": "svd",
             "random_state": 42,
         }
 
