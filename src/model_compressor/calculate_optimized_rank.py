@@ -226,6 +226,7 @@ def global_optimize_tucker_rank(
                 self,
                 rank: list,
             ) -> dict[str, float]:
+                tensor = tl.tensor(self.tensor).to("cuda") if tl.get_backend() == "pytorch" else tl.tensor(self.tensor)
                 weight, factors = tl.decomposition.tucker(tensor, rank=rank, **tucker_args)
                 reconstructed_tensor = tl.tucker_to_tensor((weight, factors))
 
