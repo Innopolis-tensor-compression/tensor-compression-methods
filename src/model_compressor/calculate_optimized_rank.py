@@ -34,7 +34,7 @@ def compression_ratio_nn(tensor, ranks: list[int] | tuple[int, int]) -> float:
 
 def loss_function_tucker(
     rank: list,
-    tensor: np.ndarray,
+    tensor: tl.tensor,
     target_compression_ratio: float,
     tucker_args: dict[str, str | int] | None = None,
     frobenius_error_coef: float = 1.0,
@@ -47,7 +47,7 @@ def loss_function_tucker(
     ----------
     rank : list
         The ranks for Tucker decomposition.
-    tensor : np.ndarray
+    tensor : tl.tensor
         The input tensor to be decomposed.
     target_compression_ratio : float
         The desired compression ratio as a percentage.
@@ -72,8 +72,6 @@ def loss_function_tucker(
         }
 
     try:
-        if tl.get_backend() == "pytorch":
-            tensor = tl.tensor(tensor).to("cuda")
         weight, factors = tl.decomposition.tucker(tensor, rank=rank, **tucker_args)
         reconstructed_tensor = tl.tucker_to_tensor((weight, factors))
 
@@ -93,7 +91,7 @@ def loss_function_tucker(
 
 def loss_tucker_wrapper(
     tucker_rank: list,
-    tensor: np.ndarray,
+    tensor: tl.tensor,
     target_compression_ratio: float,
     frobenius_error_coef: float,
     compression_ratio_coef: float,
@@ -106,7 +104,7 @@ def loss_tucker_wrapper(
     ----------
     tucker_rank : list
         The list of tucker ranks that are optimized.
-    tensor : np.ndarray
+    tensor : tl.tensor
         The input tensor to be decomposed.
     target_compression_ratio : float
         The desired compression ratio.
@@ -186,6 +184,8 @@ def global_optimize_tucker_rank(
         - reconstructed_tensor (np.ndarray): The reconstructed tensor after Tucker decomposition.
 
     """
+    tensor = tl.tensor(tensor).to("cuda") if tl.get_backend() == "pytorch" else tl.tensor(tensor)
+
     if loss_function_fixed is None:
         loss_function_fixed = partial(
             loss_tucker_wrapper,
@@ -226,13 +226,12 @@ def global_optimize_tucker_rank(
                 self,
                 rank: list,
             ) -> dict[str, float]:
-                tensor = tl.tensor(self.tensor).to("cuda") if tl.get_backend() == "pytorch" else tl.tensor(self.tensor)
-                weight, factors = tl.decomposition.tucker(tensor, rank=rank, **tucker_args)
+                weight, factors = tl.decomposition.tucker(self.tensor, rank=rank, **tucker_args)
                 reconstructed_tensor = tl.tucker_to_tensor((weight, factors))
 
                 target_compression_ratio = self.target_compression_ratio / 100
 
-                frobenius_error = (tl.norm(reconstructed_tensor - tensor) / tl.norm(tensor)).item()
+                frobenius_error = (tl.norm(reconstructed_tensor - self.tensor) / tl.norm(self.tensor)).item()
                 compression_ratio = compression_ratio_nn(tensor=reconstructed_tensor, ranks=rank)
                 compression_penalty = (target_compression_ratio - compression_ratio) ** 2
                 loss = frobenius_error_coef * frobenius_error + compression_ratio_coef * compression_penalty
