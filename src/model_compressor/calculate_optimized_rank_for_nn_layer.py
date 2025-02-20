@@ -6,30 +6,7 @@ import tensorly as tl
 from scipy.optimize import OptimizeResult, differential_evolution
 
 from src.model_compressor.calculate_bounds import calculate_tucker_bounds_for_layer_for_nn
-
-
-def compression_ratio_nn(tensor, ranks: list[int] | tuple[int, int]) -> float:
-    """
-    Returns the custom compression ratio of the layer of neural network after Tucker decomposition.
-
-    Parameters
-    ----------
-    tensor : np.ndarray
-        The original tensor.
-    ranks : list[int] | tuple[int, int]
-        The Tucker ranks for decomposition.
-
-    Returns
-    -------
-    float
-        The computed compression ratio.
-
-    """
-    size = tensor.shape
-    size1 = size[0] * ranks[0]
-    size2 = ranks[0] * ranks[1] * size[2] ** 2
-    size3 = size[1] * ranks[1]
-    return (size1 + size2 + size3) / (size[0] * size[1] * size[2] ** 2)
+from src.model_compressor.custom_compression_ratio import compression_ratio_nn
 
 
 def loss_function_tucker(
@@ -72,6 +49,8 @@ def loss_function_tucker(
         }
 
     try:
+        tensor = tl.tensor(tensor).to("cuda") if tl.get_backend() == "pytorch" else tl.tensor(tensor)
+
         weight, factors = tl.decomposition.tucker(tensor, rank=rank, **tucker_args)
         reconstructed_tensor = tl.tucker_to_tensor((weight, factors))
 
@@ -91,7 +70,7 @@ def loss_function_tucker(
 
 def loss_tucker_wrapper(
     tucker_rank: list[float],
-    tensor: tl.tensor,
+    tensor: np.ndarray,
     target_compression_ratio: float,
     frobenius_error_coef: float,
     compression_ratio_coef: float,
@@ -104,7 +83,7 @@ def loss_tucker_wrapper(
     ----------
     tucker_rank : list
         The list of tucker ranks that are optimized.
-    tensor : tl.tensor
+    tensor : np.ndarray
         The input tensor to be decomposed.
     target_compression_ratio : float
         The desired compression ratio.
@@ -187,8 +166,6 @@ def global_optimize_tucker_rank(
         - reconstructed_tensor (np.ndarray): The reconstructed tensor after Tucker decomposition.
 
     """
-    tensor = tl.tensor(tensor).to("cuda") if tl.get_backend() == "pytorch" else tl.tensor(tensor)
-
     if loss_function_fixed is None:
         loss_function_fixed = partial(
             loss_tucker_wrapper,
@@ -219,7 +196,14 @@ def global_optimize_tucker_rank(
                 self.logs: list[str | float | list | dict[str, float] | OptimizeResult] = []
                 self.current_iteration = -1
 
-                self.tensor = tensor
+                if tl.get_backend() == "pytorch":
+                    tl_tensor = tl.tensor(tensor).to("cuda")
+                elif tl.get_backend() == "numpy":
+                    tl_tensor = tl.tensor(tensor)
+                else:
+                    tl_tensor = tl.tensor(tensor)
+
+                self.tensor = tl_tensor
                 self.tucker_args = tucker_args
                 self.target_compression_ratio = target_compression_ratio
                 self.frobenius_error_coef = frobenius_error_coef
@@ -278,7 +262,7 @@ def global_optimize_tucker_rank(
         else None
     )
 
-    callback_param = optimization_logger.callback if optimization_method not in [] or verbose is True else None
+    callback_param = optimization_logger.callback if optimization_method not in [] and verbose is True else None
 
     if optimization_method == "differential_evolution":
         optimization_kwargs_differential_evolution = {
@@ -317,7 +301,18 @@ def global_optimize_tucker_rank(
         optimal_rank = list(np.clip(np.round(result.x).astype(int), 1, None))
         final_loss = result.fun
 
-        weight, factors = tl.decomposition.tucker(tensor, rank=optimal_rank, **tucker_args)
+        if tl.get_backend() == "pytorch":
+            tl_tensor = tl.tensor(tensor).to("cuda")
+        elif tl.get_backend() == "numpy":
+            tl_tensor = tl.tensor(tensor)
+        else:
+            tl_tensor = tl.tensor(tensor)
+
+        weight, factors = tl.decomposition.tucker(
+            tl_tensor,
+            rank=optimal_rank,
+            **tucker_args,
+        )
         reconstructed_tensor = tl.tucker_to_tensor((weight, factors))
 
         if verbose is True:
