@@ -90,7 +90,7 @@ def loss_function_tucker(
 
 
 def loss_tucker_wrapper(
-    tucker_rank: list,
+    tucker_rank: list[float],
     tensor: tl.tensor,
     target_compression_ratio: float,
     frobenius_error_coef: float,
@@ -122,6 +122,7 @@ def loss_tucker_wrapper(
 
     """
     loss = float("inf")
+    tucker_rank = list(np.round(tucker_rank).astype(int))
     try:
         loss = loss_function_tucker(
             rank=tucker_rank,
