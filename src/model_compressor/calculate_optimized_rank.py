@@ -149,6 +149,8 @@ def global_optimize_tucker_rank(
     """
     Performs global optimization of Tucker decomposition ranks using evolutionary strategies.
 
+    Function works with pytorch and numpy backend context of tensorly.
+
     Parameters
     ----------
     tensor : np.ndarray
@@ -290,11 +292,24 @@ def global_optimize_tucker_rank(
             "recombination": 0.9,
             "init": "latinhypercube",
             "polish": True,
-            "workers": -1,
-            "updating": "deferred",
             "callback": callback_param,
             "disp": True,
         }
+
+        if tl.get_backend() == "pytorch":
+            optimization_kwargs_differential_evolution.update(
+                {
+                    "workers": 1,
+                    "updating": "immediate",
+                }
+            )
+        elif tl.get_backend() == "numpy":
+            optimization_kwargs_differential_evolution.update(
+                {
+                    "workers": -1,
+                    "updating": "deferred",
+                }
+            )
 
         result = differential_evolution(**optimization_kwargs_differential_evolution)
 
