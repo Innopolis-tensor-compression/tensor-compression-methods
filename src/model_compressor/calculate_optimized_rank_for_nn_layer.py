@@ -166,6 +166,13 @@ def global_optimize_tucker_rank(
         - reconstructed_tensor (np.ndarray): The reconstructed tensor after Tucker decomposition.
 
     """
+    if tucker_args is None:
+        tucker_args = {
+            "svd": "truncated_svd",
+            "init": "svd",
+            "random_state": 42,
+        }
+
     if loss_function_fixed is None:
         loss_function_fixed = partial(
             loss_tucker_wrapper,
@@ -173,14 +180,8 @@ def global_optimize_tucker_rank(
             target_compression_ratio=target_compression_ratio,
             frobenius_error_coef=frobenius_error_coef,
             compression_ratio_coef=compression_ratio_coef,
+            tucker_args=tucker_args,
         )
-
-    if tucker_args is None:
-        tucker_args = {
-            "svd": "truncated_svd",
-            "init": "svd",
-            "random_state": 42,
-        }
 
     if verbose is True:
 

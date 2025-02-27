@@ -7,13 +7,14 @@ from warnings import warn
 
 from tensorly import set_backend
 from tensorly.decomposition import parafac, tucker
+from tltorch import FactorizedLinear
 from torch import device, float32, tensordot
 from torch.nn import Conv2d, ConvTranspose2d, Linear, Module, Sequential
 from torch.nn.modules.loss import _Loss
 from torch.nn.parameter import Parameter
 from torch.optim import Optimizer
 
-from src.model_compressor.calculate_optimized_rank import global_optimize_tucker_rank
+from src.model_compressor.calculate_optimized_rank_for_nn_layer import global_optimize_tucker_rank
 
 set_backend("pytorch")
 
@@ -160,10 +161,10 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
         rank_tkd = [in_channels, out_channels]
     else:
         if rank_tkd[0] > in_channels:
-            rank_tkd = (in_channels, rank_tkd[1], rank_tkd[2])
+            rank_tkd = [in_channels, rank_tkd[1]]
             warn("rank_tkd[0] is bigger then in_channels")
         if rank_tkd[1] > out_channels:
-            rank_tkd = (rank_tkd[0], out_channels, rank_tkd[2])
+            rank_tkd = [rank_tkd[0], out_channels]
             warn("rank_tkd[1] is bigger then out_channels")
 
     # TKD decomposition
@@ -630,11 +631,6 @@ def compress_model(
         case _:
             raise ValueError(f"Unknown compression method: {conv_transpose_compression_method}")
 
-    match linear_compress_method:
-        case "None":
-            pass
-        case _:
-            warn("Linear compression is not implemented yet")
 
     last_name, last_layer = __get_last_layer(model)
 
@@ -643,34 +639,39 @@ def compress_model(
             continue
 
         # calculate optimized rank
-        tensor = child.weight.reshape(
-            child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
-        )
 
-        method = "differential_evolution"
 
-        try:
-            start_time = time.perf_counter()
-            reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
-                global_optimize_tucker_rank(
-                    optimization_method=method,
-                    tensor=tensor,
-                    target_compression_ratio=target_compression_ratio,
-                    frobenius_error_coef=frobenius_error_coef,
-                    compression_ratio_coef=compression_ratio_coef,
-                    verbose=True,
-                )
-            )
-            elapsed_time = time.perf_counter() - start_time
-        except Exception as e:
-            print(f"Error with method {method}: {e}")
 
         if isinstance(child, Conv2d) and Conv2d in layers:
             setattr(model, name, conv_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, ConvTranspose2d) and ConvTranspose2d in layers:
+            tensor = child.weight.reshape(
+                child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
+            )
+
+            method = "differential_evolution"
+
+            try:
+                start_time = time.perf_counter()
+                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                    global_optimize_tucker_rank(
+                        optimization_method=method,
+                        tensor=tensor,
+                        target_compression_ratio=target_compression_ratio,
+                        frobenius_error_coef=frobenius_error_coef,
+                        compression_ratio_coef=compression_ratio_coef,
+                        verbose=True,
+                    )
+                )
+                elapsed_time = time.perf_counter() - start_time
+                print(elapsed_time)
+                print(optimal_rank)
+                rank_tkd = optimal_rank[0:2]
+            except Exception as e:
+                print(f"Error with method {method}: {e}")
             setattr(model, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
-        elif isinstance(child, Linear) and Linear in layers:
-            warn("Linear compression is not implemented yet")
+        elif isinstance(child, Linear) and Linear in layers and linear_compress_method != "None":
+            setattr(model, name, FactorizedLinear.from_linear(child, factorization=linear_compress_method))
         else:
             compress_model(
                 child,
@@ -678,6 +679,9 @@ def compress_model(
                 conv_compression_method,
                 conv_transpose_compression_method,
                 linear_compress_method,
+                target_compression_ratio,
+                frobenius_error_coef,
+                compression_ratio_coef,
                 rank_cpd,
                 rank_tkd,
             )
