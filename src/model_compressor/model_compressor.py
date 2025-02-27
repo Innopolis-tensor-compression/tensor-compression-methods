@@ -3,16 +3,19 @@ This module contains functions for compressing entire module and Conv2d, ConvTra
 """
 
 import time
+from copy import deepcopy
+from typing import Type
 from warnings import warn
 
 from tensorly import set_backend
 from tensorly.decomposition import parafac, tucker
 from tltorch import FactorizedLinear
-from torch import device, float32, tensordot
+import torch
 from torch.nn import Conv2d, ConvTranspose2d, Linear, Module, Sequential
 from torch.nn.modules.loss import _Loss
 from torch.nn.parameter import Parameter
 from torch.optim import Optimizer
+from torch.utils.data import DataLoader
 
 from src.model_compressor.calculate_optimized_rank_for_nn_layer import global_optimize_tucker_rank
 
@@ -39,7 +42,7 @@ def svd_conv2d(conv_layer: Conv2d, rank_cpd: int = None) -> Sequential:
     conv_weight = conv_layer.weight.squeeze().squeeze()
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_cpd is not specified, it will be set to the smallest dimension of the kernel
@@ -54,8 +57,8 @@ def svd_conv2d(conv_layer: Conv2d, rank_cpd: int = None) -> Sequential:
     factor_cpd_output = factors[0].unsqueeze(2).unsqueeze(3)
 
     # Create compressed ConvTranspose2d layer
-    conv1 = Conv2d(in_channels, rank_cpd, 1, stride=stride, dtype=float32, bias=bias)
-    conv2 = Conv2d(rank_cpd, out_channels, 1, dtype=float32, bias=bias)
+    conv1 = Conv2d(in_channels, rank_cpd, 1, stride=stride, dtype=torch.float32, bias=bias)
+    conv2 = Conv2d(rank_cpd, out_channels, 1, dtype=torch.float32, bias=bias)
     conv1.weight = Parameter(factor_cpd_input)
     conv2.weight = Parameter(factor_cpd_output)
     return Sequential(conv1, conv2)
@@ -89,7 +92,7 @@ def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_cpd is not specified, it will be set to the smallest dimension of the kernel
@@ -105,7 +108,7 @@ def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     factor_cpd_output = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
-    conv1_cpd = Conv2d(in_channels, rank_cpd, 1, dtype=float32, bias=bias)
+    conv1_cpd = Conv2d(in_channels, rank_cpd, 1, dtype=torch.float32, bias=bias)
     conv2_cpd = Conv2d(
         rank_cpd,
         rank_cpd,
@@ -114,10 +117,10 @@ def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
         stride=stride,
         padding=padding,
         dilation=dilation,
-        dtype=float32,
+        dtype=torch.float32,
         bias=bias,
     )
-    conv3_cpd = Conv2d(rank_cpd, out_channels, 1, dtype=float32, bias=bias)
+    conv3_cpd = Conv2d(rank_cpd, out_channels, 1, dtype=torch.float32, bias=bias)
     conv1_cpd.weight = Parameter(factor_cpd_input)
     conv2_cpd.weight = Parameter(factor_cpd_hidden)
     conv3_cpd.weight = Parameter(factor_cpd_output)
@@ -153,7 +156,7 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_tkd is not specified, it will be set to the dimensions of the Conv2d layer
@@ -173,14 +176,14 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     # Reshape factors to fit Conv2d layer
     factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_tkd_hidden = (
-        tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
+        torch.tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
         .permute([1, 2, 0])
         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
     )
     factor_tkd_output = factors_tkd[0].unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
-    conv1_tkd = Conv2d(in_channels, rank_tkd[1], 1, dtype=float32, bias=bias)
+    conv1_tkd = Conv2d(in_channels, rank_tkd[1], 1, dtype=torch.float32, bias=bias)
     conv2_tkd = Conv2d(
         rank_tkd[1],
         rank_tkd[0],
@@ -188,10 +191,10 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
         stride=stride,
         padding=padding,
         dilation=dilation,
-        dtype=float32,
+        dtype=torch.float32,
         bias=bias,
     )
-    conv3_tkd = Conv2d(rank_tkd[0], out_channels, 1, dtype=float32, bias=bias)
+    conv3_tkd = Conv2d(rank_tkd[0], out_channels, 1, dtype=torch.float32, bias=bias)
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv3_tkd.weight = Parameter(factor_tkd_output)
@@ -229,7 +232,7 @@ def tkd_cpd_conv2d(
     conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_tkd is not specified, it will be set to the dimensions of the Conv2d layer
@@ -249,7 +252,7 @@ def tkd_cpd_conv2d(
     # Reshape factors to fit Conv2d layer
     factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_tkd_hidden = (
-        tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
+        torch.tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
         .permute([1, 2, 0])
         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
     )
@@ -263,15 +266,15 @@ def tkd_cpd_conv2d(
         stride=stride,
         padding=padding,
         dilation=dilation,
-        dtype=float32,
+        dtype=torch.float32,
         bias=bias,
     )
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv2_tkd = cpd_conv2d(conv2_tkd, rank_cpd=rank_cpd)
 
     # Create compressed Conv2d layer
-    conv1_tkd = Conv2d(in_channels, rank_tkd[0], 1, dtype=float32, bias=bias)
-    conv3_tkd = Conv2d(rank_tkd[1], out_channels, 1, dtype=float32, bias=bias)
+    conv1_tkd = Conv2d(in_channels, rank_tkd[0], 1, dtype=torch.float32, bias=bias)
+    conv3_tkd = Conv2d(rank_tkd[1], out_channels, 1, dtype=torch.float32, bias=bias)
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv3_tkd.weight = Parameter(factor_tkd_output)
 
@@ -300,7 +303,7 @@ def svd_conv_transpose2d(conv_layer: ConvTranspose2d, rank_cpd: int = None) -> S
     conv_weight = conv_layer.weight.squeeze().squeeze()
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_cpd is not specified, it will be set to the smallest dimension of the kernel
@@ -315,8 +318,8 @@ def svd_conv_transpose2d(conv_layer: ConvTranspose2d, rank_cpd: int = None) -> S
     factor_svd_output = factors[0].unsqueeze(2).unsqueeze(3)
 
     # Create compressed ConvTranspose2d layer
-    conv1 = ConvTranspose2d(in_channels, rank_cpd, 1, stride=stride, dtype=float32, bias=bias)
-    conv2 = ConvTranspose2d(rank_cpd, out_channels, 1, dtype=float32, bias=bias)
+    conv1 = ConvTranspose2d(in_channels, rank_cpd, 1, stride=stride, dtype=torch.float32, bias=bias)
+    conv2 = ConvTranspose2d(rank_cpd, out_channels, 1, dtype=torch.float32, bias=bias)
     conv1.weight = Parameter(factor_svd_input)
     conv2.weight = Parameter(factor_svd_output)
     return Sequential(conv1, conv2)
@@ -352,7 +355,7 @@ def cpd_conv_transpose2d(
     conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_cpd is not specified, it will be set to the smallest dimension of the kernel
@@ -372,7 +375,7 @@ def cpd_conv_transpose2d(
     factor_cpd_output = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
 
     # Create compressed ConvTranspose2d layer
-    conv1_cpd = ConvTranspose2d(in_channels, rank_cpd, 1, dtype=float32, bias=bias)
+    conv1_cpd = ConvTranspose2d(in_channels, rank_cpd, 1, dtype=torch.float32, bias=bias)
     conv2_cpd = ConvTranspose2d(
         rank_cpd,
         rank_cpd,
@@ -381,10 +384,10 @@ def cpd_conv_transpose2d(
         stride=stride,
         padding=padding,
         dilation=dilation,
-        dtype=float32,
+        dtype=torch.float32,
         bias=bias,
     )
-    conv3_cpd = ConvTranspose2d(rank_cpd, out_channels, 1, dtype=float32, bias=bias)
+    conv3_cpd = ConvTranspose2d(rank_cpd, out_channels, 1, dtype=torch.float32, bias=bias)
     conv1_cpd.weight = Parameter(factor_cpd_input)
     conv2_cpd.weight = Parameter(factor_cpd_hidden)
     conv3_cpd.weight = Parameter(factor_cpd_output)
@@ -422,7 +425,7 @@ def tkd_conv_transpose2d(
     conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_tkd is not specified, it will be set to the dimensions of the ConvTranspose2d layer
@@ -442,13 +445,13 @@ def tkd_conv_transpose2d(
 
     # Reshape factors to fit ConvTranspose2d layer
     factor_tkd_input = factors_tkd[0].unsqueeze(2).unsqueeze(3)
-    factor_tkd_hidden = tensordot(core_tkd, factors_tkd[2], dims=([2], [1])).reshape(
+    factor_tkd_hidden = torch.tensordot(core_tkd, factors_tkd[2], dims=([2], [1])).reshape(
         rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y
     )
     factor_tkd_output = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
 
     # Create compressed ConvTranspose2d layer
-    conv1_tkd = ConvTranspose2d(in_channels, rank_tkd[0], 1, dtype=float32, bias=bias)
+    conv1_tkd = ConvTranspose2d(in_channels, rank_tkd[0], 1, dtype=torch.float32, bias=bias)
     conv2_tkd = ConvTranspose2d(
         rank_tkd[0],
         rank_tkd[1],
@@ -456,10 +459,10 @@ def tkd_conv_transpose2d(
         stride=stride,
         padding=padding,
         dilation=dilation,
-        dtype=float32,
+        dtype=torch.float32,
         bias=bias,
     )
-    conv3_tkd = ConvTranspose2d(rank_tkd[1], out_channels, 1, dtype=float32, bias=bias)
+    conv3_tkd = ConvTranspose2d(rank_tkd[1], out_channels, 1, dtype=torch.float32, bias=bias)
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv3_tkd.weight = Parameter(factor_tkd_output)
@@ -497,7 +500,7 @@ def tkd_cpd_conv_transpose2d(
     conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
-    if conv_weight.dtype != float32:
+    if conv_weight.dtype != torch.float32:
         warn("Currently only float32 supported. It will be converted to float32")
 
     # If rank_tkd is not specified, it will be set to the dimensions of the ConvTranspose2d layer
@@ -517,7 +520,7 @@ def tkd_cpd_conv_transpose2d(
     # Reshape factors to fit ConvTranspose2d layer
     factor_tkd_input = factors_tkd[0].unsqueeze(2).unsqueeze(3)
     factor_tkd_hidden = (
-        tensordot(core_tkd, factors_tkd[2], dims=([2], [1]))
+        torch.tensordot(core_tkd, factors_tkd[2], dims=([2], [1]))
         .permute([1, 2, 0])
         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
     )
@@ -531,15 +534,15 @@ def tkd_cpd_conv_transpose2d(
         stride=stride,
         padding=padding,
         dilation=dilation,
-        dtype=float32,
+        dtype=torch.float32,
         bias=bias,
     )
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv2_tkd = cpd_conv_transpose2d(conv2_tkd, rank_cpd=rank_cpd)
 
     # Create compressed ConvTranspose2d layer
-    conv1_tkd = ConvTranspose2d(in_channels, rank_tkd[0], 1, dtype=float32, bias=bias)
-    conv3_tkd = ConvTranspose2d(rank_tkd[1], out_channels, 1, dtype=float32, bias=bias)
+    conv1_tkd = ConvTranspose2d(in_channels, rank_tkd[0], 1, dtype=torch.float32, bias=bias)
+    conv3_tkd = ConvTranspose2d(rank_tkd[1], out_channels, 1, dtype=torch.float32, bias=bias)
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv3_tkd.weight = Parameter(factor_tkd_output)
 
@@ -577,11 +580,14 @@ def compress_model(
     rank_cpd: int = None,
     rank_tkd: list[int] | tuple[int, int] = None,
     finetune: bool = False,
-    optimizer: Optimizer = None,
+    epochs: int = 10,
+    optimizer: Type[Optimizer] = None,
+    data_size: list[int] = None,
     lr: float = 10e-3,
-    loss_function: _Loss = None,
+    loss_function: Type[_Loss] = None,
     batch_size: int = 32,
-    finetune_device: device | str = "cpu",
+    number_of_iterations: int = 100,
+    finetune_device: torch.device | str = "cpu",
 ) -> None:
     """
     Compresses specified layers of the model using specified compression methods
@@ -591,23 +597,32 @@ def compress_model(
         layers: List of layer types to compress. Default: [torch.nn.Linear, torch.nn.Conv2d, torch.nn.ConvTranspose2d].
         conv_compression_method: Method for compressing ConvTranspose2d layers. Possible values: "CPD", "TKD", "TKDCPD".
         conv_transpose_compression_method: Method for compressing ConvTranspose2d layers. Possible values: "CPD", "TKD", "TKDCPD".
-        linear_compress_method: Method for compressing Linear layers. Possible values: "CPD", "TKD", "TKDCPD".
+        linear_compress_method: Method for compressing Linear layers. Possible values: "CP", "TT", "Tucker".
         target_compression_ratio: Target ratio for compression. If rank is not None, it is ignored.
         frobenius_error_coef: Coefficient for optimizing rank, based on frobenius error.
         compression_ratio_coef: oefficient for optimizing rank, based on compression ratio.
         rank_cpd: Rank of CPD decomposition.
         rank_tkd: Rank of Tucker decomposition.
         finetune: If True, the model will be fine-tuned after compression. Default: False.
+        epochs: Number of epochs for fine-tuning. Default: 10.
         optimizer: Optimizer for fine-tuning. Default: SGD.
+        data_size: Size of data for fine-tuning. Default: [3, 224, 224].
         lr: Learning rate for fine-tuning. Default: 10e-3.
         loss_function: Loss function for fine-tuning.
         batch_size: Batch size for fine-tuning. Default: 32.
+        number_of_iterations: Number of iterations for fine-tuning. Default: 100.
         finetune_device: Device for fine-tuning. Default: "cpu".
 
     Raises:
         ValueError: If an unknown compression method is specified.
 
     """
+    if finetune:
+        if optimizer is None or loss_function is None:
+            raise ValueError("Optimizer and loss function must be specified for fine-tuning")
+        teacher_model = deepcopy(model)
+        optim = optimizer(model.parameters(), lr=lr)
+
     if layers is None:
         layers = [Linear, Conv2d, ConvTranspose2d]
 
@@ -638,16 +653,13 @@ def compress_model(
         if name == last_name and child == last_layer:
             continue
 
-        # calculate optimized rank
-
-
-
         if isinstance(child, Conv2d) and Conv2d in layers:
             setattr(model, name, conv_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, ConvTranspose2d) and ConvTranspose2d in layers:
+            # calculate optimized rank
             tensor = child.weight.reshape(
                 child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
-            )
+            ).detach().numpy()
 
             method = "differential_evolution"
 
@@ -669,6 +681,7 @@ def compress_model(
                 rank_tkd = optimal_rank[0:2]
             except Exception as e:
                 print(f"Error with method {method}: {e}")
+
             setattr(model, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, Linear) and Linear in layers and linear_compress_method != "None":
             setattr(model, name, FactorizedLinear.from_linear(child, factorization=linear_compress_method))
@@ -687,4 +700,20 @@ def compress_model(
             )
 
     if finetune:
-        warn("Fine-tuning is not implemented yet")
+        data = torch.randn(batch_size * number_of_iterations, *data_size, device=finetune_device)
+        dataloader = DataLoader(data, batch_size=batch_size)
+        teacher_model = teacher_model.to(finetune_device)
+        teacher_model.eval()
+        loss_function = loss_function()
+        model = model.to(finetune_device)
+        model.train()
+        for epoch in range(epochs):
+            for i, batch in enumerate(dataloader):
+                with torch.no_grad():
+                    target = teacher_model(batch)
+                output = model(batch)
+                optim.zero_grad()
+                loss = loss_function(output, target)
+                loss.backward()
+                optim.step()
+            print(f"Epoch {epoch + 1}/{epochs}, loss: {loss.item()}")
