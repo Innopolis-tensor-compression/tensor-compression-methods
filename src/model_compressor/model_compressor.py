@@ -103,9 +103,9 @@ def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     _, factors_cpd = parafac(conv_weight, rank_cpd)
 
     # Reshape factors to fit Conv2d layer
-    factor_cpd_input = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
+    factor_cpd_input = factors_cpd[0].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_cpd_hidden = factors_cpd[2].permute([1, 0]).unsqueeze(1).reshape(rank_cpd, 1, kernel_size_x, kernel_size_y)
-    factor_cpd_output = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
+    factor_cpd_output = factors_cpd[1].unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
     conv1_cpd = Conv2d(in_channels, rank_cpd, 1, dtype=torch.float32, bias=bias)
@@ -250,13 +250,13 @@ def tkd_cpd_conv2d(
     core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_x * kernel_size_y])
 
     # Reshape factors to fit Conv2d layer
-    factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
+    factor_tkd_input = factors_tkd[0].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_tkd_hidden = (
         torch.tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
         .permute([1, 2, 0])
         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
     )
-    factor_tkd_output = factors_tkd[0].unsqueeze(2).unsqueeze(3)
+    factor_tkd_output = factors_tkd[1].unsqueeze(2).unsqueeze(3)
 
     # CPD decomposition of middle Conv2d
     conv2_tkd = Conv2d(
@@ -649,57 +649,58 @@ def compress_model(
 
     if isinstance(model, (Linear, Conv2d, ConvTranspose2d)):
         if isinstance(model, Conv2d) and Conv2d in layers:
-            tensor = model.weight.reshape(
-                model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
-            ).detach().numpy()
+            if (conv_compression_method == "TKD" or conv_compression_method == "TKDCPD") and rank_tkd is None:
+                tensor = model.weight.reshape(
+                    model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
+                ).detach().numpy()
 
-            method = "differential_evolution"
+                method = "differential_evolution"
 
-            try:
-                start_time = time.perf_counter()
-                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
-                    global_optimize_tucker_rank(
-                        optimization_method=method,
-                        tensor=tensor,
-                        target_compression_ratio=target_compression_ratio,
-                        frobenius_error_coef=frobenius_error_coef,
-                        compression_ratio_coef=compression_ratio_coef,
-                        verbose=True,
+                try:
+                    start_time = time.perf_counter()
+                    reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                        global_optimize_tucker_rank(
+                            optimization_method=method,
+                            tensor=tensor,
+                            target_compression_ratio=target_compression_ratio,
+                            frobenius_error_coef=frobenius_error_coef,
+                            compression_ratio_coef=compression_ratio_coef,
+                            verbose=True,
+                        )
                     )
-                )
-                elapsed_time = time.perf_counter() - start_time
-                print(elapsed_time)
-                print(optimal_rank)
-                rank_tkd = [optimal_rank[1], optimal_rank[0]]
-            except Exception as e:
-                print(f"Error with method {method}: {e}")
+                    elapsed_time = time.perf_counter() - start_time
+                    print(elapsed_time)
+                    print(optimal_rank)
+                    rank_tkd = [optimal_rank[1], optimal_rank[0]]
+                except Exception as e:
+                    print(f"Error with method {method}: {e}")
             model = conv_compression_func(model, rank_cpd, rank_tkd)
         elif isinstance(model, ConvTranspose2d) and ConvTranspose2d in layers:
-            # calculate optimized rank
-            tensor = model.weight.reshape(
-                model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
-            ).detach().numpy()
+            if (conv_transpose_compression_method == "TKD" or conv_transpose_compression_method == "TKDCPD") and rank_tkd is None:
+                tensor = model.weight.reshape(
+                    model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
+                ).detach().numpy()
 
-            method = "differential_evolution"
+                method = "differential_evolution"
 
-            try:
-                start_time = time.perf_counter()
-                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
-                    global_optimize_tucker_rank(
-                        optimization_method=method,
-                        tensor=tensor,
-                        target_compression_ratio=target_compression_ratio,
-                        frobenius_error_coef=frobenius_error_coef,
-                        compression_ratio_coef=compression_ratio_coef,
-                        verbose=True,
+                try:
+                    start_time = time.perf_counter()
+                    reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                        global_optimize_tucker_rank(
+                            optimization_method=method,
+                            tensor=tensor,
+                            target_compression_ratio=target_compression_ratio,
+                            frobenius_error_coef=frobenius_error_coef,
+                            compression_ratio_coef=compression_ratio_coef,
+                            verbose=True,
+                        )
                     )
-                )
-                elapsed_time = time.perf_counter() - start_time
-                print(elapsed_time)
-                print(optimal_rank)
-                rank_tkd = [optimal_rank[1], optimal_rank[0]]
-            except Exception as e:
-                print(f"Error with method {method}: {e}")
+                    elapsed_time = time.perf_counter() - start_time
+                    print(elapsed_time)
+                    print(optimal_rank)
+                    rank_tkd = [optimal_rank[1], optimal_rank[0]]
+                except Exception as e:
+                    print(f"Error with method {method}: {e}")
 
             model = conv_transpose_compression_func(model, rank_cpd, rank_tkd)
         elif isinstance(model, Linear) and Linear in layers and linear_compress_method != "None":
@@ -708,61 +709,64 @@ def compress_model(
 
     for name, child in model.named_children():
         if isinstance(child, Conv2d) and Conv2d in layers:
-            tensor = child.weight.reshape(
-                child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
-            ).detach().numpy()
+            if (conv_compression_method == "TKD" or conv_compression_method == "TKDCPD") and rank_tkd is None:
+                tensor = child.weight.reshape(
+                    child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
+                ).detach().numpy()
 
-            method = "differential_evolution"
+                method = "differential_evolution"
 
-            try:
-                start_time = time.perf_counter()
-                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
-                    global_optimize_tucker_rank(
-                        optimization_method=method,
-                        tensor=tensor,
-                        target_compression_ratio=target_compression_ratio,
-                        frobenius_error_coef=frobenius_error_coef,
-                        compression_ratio_coef=compression_ratio_coef,
-                        verbose=True,
+                try:
+                    start_time = time.perf_counter()
+                    reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                        global_optimize_tucker_rank(
+                            optimization_method=method,
+                            tensor=tensor,
+                            target_compression_ratio=target_compression_ratio,
+                            frobenius_error_coef=frobenius_error_coef,
+                            compression_ratio_coef=compression_ratio_coef,
+                            verbose=True,
+                        )
                     )
-                )
-                elapsed_time = time.perf_counter() - start_time
-                print(elapsed_time)
-                print(optimal_rank)
-                rank_tkd = [optimal_rank[1], optimal_rank[0]]
-            except Exception as e:
-                print(f"Error with method {method}: {e}")
-            setattr(model, name, conv_compression_func(child, rank_cpd, rank_tkd))
+                    elapsed_time = time.perf_counter() - start_time
+                    print(elapsed_time)
+                    print(optimal_rank)
+                    setattr(child, name, conv_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
+                except Exception as e:
+                    print(f"Error with method {method}: {e}")
+            else:
+                setattr(child, name, conv_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, ConvTranspose2d) and ConvTranspose2d in layers:
-            # calculate optimized rank
-            tensor = child.weight.reshape(
-                child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
-            ).detach().numpy()
+            if (conv_transpose_compression_method == "TKD" or conv_transpose_compression_method == "TKDCPD") and rank_tkd is None:
+                tensor = child.weight.reshape(
+                    child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
+                ).detach().numpy()
 
-            method = "differential_evolution"
+                method = "differential_evolution"
 
-            try:
-                start_time = time.perf_counter()
-                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
-                    global_optimize_tucker_rank(
-                        optimization_method=method,
-                        tensor=tensor,
-                        target_compression_ratio=target_compression_ratio,
-                        frobenius_error_coef=frobenius_error_coef,
-                        compression_ratio_coef=compression_ratio_coef,
-                        verbose=True,
+                try:
+                    start_time = time.perf_counter()
+                    reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                        global_optimize_tucker_rank(
+                            optimization_method=method,
+                            tensor=tensor,
+                            target_compression_ratio=target_compression_ratio,
+                            frobenius_error_coef=frobenius_error_coef,
+                            compression_ratio_coef=compression_ratio_coef,
+                            verbose=True,
+                        )
                     )
-                )
-                elapsed_time = time.perf_counter() - start_time
-                print(elapsed_time)
-                print(optimal_rank)
-                rank_tkd = [optimal_rank[1], optimal_rank[0]]
-            except Exception as e:
-                print(f"Error with method {method}: {e}")
-
-            setattr(model, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
+                    elapsed_time = time.perf_counter() - start_time
+                    print(elapsed_time)
+                    print(optimal_rank)
+                    setattr(child, name, conv_transpose_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
+                except Exception as e:
+                    print(f"Error with method {method}: {e}")
+            else:
+                setattr(child, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
+            setattr(child, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, Linear) and Linear in layers and linear_compress_method != "None":
-            setattr(model, name, FactorizedLinear.from_linear(child, factorization=linear_compress_method))
+            setattr(child, name, FactorizedLinear.from_linear(child, factorization=linear_compress_method))
         else:
             compress_model(
                 child,
