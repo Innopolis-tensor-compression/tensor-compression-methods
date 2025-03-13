@@ -142,7 +142,7 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
 
     """
     if conv_layer.kernel_size == (1, 1):
-        return svd_conv2d(conv_layer, min(rank_tkd))
+        return svd_conv2d(conv_layer, min(rank_tkd) if rank_tkd is not None else None)
 
     # Params of source conv_layer
     out_channels = conv_layer.out_channels
@@ -174,13 +174,13 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_y * kernel_size_x])
 
     # Reshape factors to fit Conv2d layer
-    factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
+    factor_tkd_input = factors_tkd[0].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_tkd_hidden = (
         torch.tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
-        .permute([1, 2, 0])
-        .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
+        .permute([2, 1, 0])
+        .reshape(rank_tkd[1], rank_tkd[0], kernel_size_x, kernel_size_y)
     )
-    factor_tkd_output = factors_tkd[0].unsqueeze(2).unsqueeze(3)
+    factor_tkd_output = factors_tkd[1].unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
     conv1_tkd = Conv2d(in_channels, rank_tkd[1], 1, dtype=torch.float32, bias=bias)
@@ -198,7 +198,7 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv3_tkd.weight = Parameter(factor_tkd_output)
-
+    torch.cuda.empty_cache()
     return Sequential(conv1_tkd, conv2_tkd, conv3_tkd)
 
 
@@ -571,13 +571,13 @@ def __get_last_layer(model: Module):
 def compress_model(
     model: Module,
     layers: list[type[Conv2d | ConvTranspose2d | Linear]] = None,
-    conv_compression_method: str = "TKDCPD",
-    conv_transpose_compression_method: str = "TKDCPD",
+    conv_compression_method: str = "TKD",
+    conv_transpose_compression_method: str = "TKD",
     linear_compress_method: str = "None",
     target_compression_ratio: float = 50.0,
     frobenius_error_coef: float = 1.0,
     compression_ratio_coef: float = 10.0,
-    rank_cpd: int = None,
+    rank_cpd: int|None = None,
     rank_tkd: list[int] | tuple[int, int] = None,
     finetune: bool = False,
     epochs: int = 10,
@@ -588,6 +588,7 @@ def compress_model(
     batch_size: int = 32,
     number_of_iterations: int = 100,
     finetune_device: torch.device | str = "cpu",
+    task: str | None = None,
 ) -> None:
     """
     Compresses specified layers of the model using specified compression methods
@@ -612,6 +613,7 @@ def compress_model(
         batch_size: Batch size for fine-tuning. Default: 32.
         number_of_iterations: Number of iterations for fine-tuning. Default: 100.
         finetune_device: Device for fine-tuning. Default: "cpu".
+        task: Task for fine-tuning. Default: None.
 
     Raises:
         ValueError: If an unknown compression method is specified.
@@ -621,7 +623,6 @@ def compress_model(
         if optimizer is None or loss_function is None:
             raise ValueError("Optimizer and loss function must be specified for fine-tuning")
         teacher_model = deepcopy(model)
-        optim = optimizer(model.parameters(), lr=lr)
 
     if layers is None:
         layers = [Linear, Conv2d, ConvTranspose2d]
@@ -646,14 +647,91 @@ def compress_model(
         case _:
             raise ValueError(f"Unknown compression method: {conv_transpose_compression_method}")
 
+    if isinstance(model, (Linear, Conv2d, ConvTranspose2d)):
+        if isinstance(model, Conv2d) and Conv2d in layers:
+            tensor = model.weight.reshape(
+                model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
+            ).detach().numpy()
 
-    last_name, last_layer = __get_last_layer(model)
+            method = "differential_evolution"
+
+            try:
+                start_time = time.perf_counter()
+                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                    global_optimize_tucker_rank(
+                        optimization_method=method,
+                        tensor=tensor,
+                        target_compression_ratio=target_compression_ratio,
+                        frobenius_error_coef=frobenius_error_coef,
+                        compression_ratio_coef=compression_ratio_coef,
+                        verbose=True,
+                    )
+                )
+                elapsed_time = time.perf_counter() - start_time
+                print(elapsed_time)
+                print(optimal_rank)
+                rank_tkd = [optimal_rank[1], optimal_rank[0]]
+            except Exception as e:
+                print(f"Error with method {method}: {e}")
+            model = conv_compression_func(model, rank_cpd, rank_tkd)
+        elif isinstance(model, ConvTranspose2d) and ConvTranspose2d in layers:
+            # calculate optimized rank
+            tensor = model.weight.reshape(
+                model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
+            ).detach().numpy()
+
+            method = "differential_evolution"
+
+            try:
+                start_time = time.perf_counter()
+                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                    global_optimize_tucker_rank(
+                        optimization_method=method,
+                        tensor=tensor,
+                        target_compression_ratio=target_compression_ratio,
+                        frobenius_error_coef=frobenius_error_coef,
+                        compression_ratio_coef=compression_ratio_coef,
+                        verbose=True,
+                    )
+                )
+                elapsed_time = time.perf_counter() - start_time
+                print(elapsed_time)
+                print(optimal_rank)
+                rank_tkd = [optimal_rank[1], optimal_rank[0]]
+            except Exception as e:
+                print(f"Error with method {method}: {e}")
+
+            model = conv_transpose_compression_func(model, rank_cpd, rank_tkd)
+        elif isinstance(model, Linear) and Linear in layers and linear_compress_method != "None":
+            model = FactorizedLinear.from_linear(model, factorization=linear_compress_method)
+        return model
 
     for name, child in model.named_children():
-        if name == last_name and child == last_layer:
-            continue
-
         if isinstance(child, Conv2d) and Conv2d in layers:
+            tensor = child.weight.reshape(
+                child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
+            ).detach().numpy()
+
+            method = "differential_evolution"
+
+            try:
+                start_time = time.perf_counter()
+                reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
+                    global_optimize_tucker_rank(
+                        optimization_method=method,
+                        tensor=tensor,
+                        target_compression_ratio=target_compression_ratio,
+                        frobenius_error_coef=frobenius_error_coef,
+                        compression_ratio_coef=compression_ratio_coef,
+                        verbose=True,
+                    )
+                )
+                elapsed_time = time.perf_counter() - start_time
+                print(elapsed_time)
+                print(optimal_rank)
+                rank_tkd = [optimal_rank[1], optimal_rank[0]]
+            except Exception as e:
+                print(f"Error with method {method}: {e}")
             setattr(model, name, conv_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, ConvTranspose2d) and ConvTranspose2d in layers:
             # calculate optimized rank
@@ -678,7 +756,7 @@ def compress_model(
                 elapsed_time = time.perf_counter() - start_time
                 print(elapsed_time)
                 print(optimal_rank)
-                rank_tkd = optimal_rank[0:2]
+                rank_tkd = [optimal_rank[1], optimal_rank[0]]
             except Exception as e:
                 print(f"Error with method {method}: {e}")
 
@@ -700,20 +778,28 @@ def compress_model(
             )
 
     if finetune:
-        data = torch.randn(batch_size * number_of_iterations, *data_size, device=finetune_device)
-        dataloader = DataLoader(data, batch_size=batch_size)
+        optim = optimizer(model.parameters(), lr=lr)
         teacher_model = teacher_model.to(finetune_device)
         teacher_model.eval()
-        loss_function = loss_function()
+        criterion = loss_function()
         model = model.to(finetune_device)
         model.train()
+
         for epoch in range(epochs):
-            for i, batch in enumerate(dataloader):
+            for _ in range(number_of_iterations):
+                inputs = torch.randn(batch_size, *data_size, device=finetune_device)
                 with torch.no_grad():
-                    target = teacher_model(batch)
-                output = model(batch)
+                    reference_outputs = teacher_model(inputs)
+                model_outputs = model(inputs)
+                if task == "classification":
+                    _, target_indices = torch.max(reference_outputs, dim=1)
+                    loss = criterion(model_outputs, target_indices)
+                elif task == "regression":
+                    loss = criterion(model_outputs, reference_outputs)
+                elif task == None:
+                    raise ValueError("Task must be specified for fine-tuning")
+                else:
+                    raise ValueError("Unknown task specified")
                 optim.zero_grad()
-                loss = loss_function(output, target)
                 loss.backward()
                 optim.step()
-            print(f"Epoch {epoch + 1}/{epochs}, loss: {loss.item()}")
