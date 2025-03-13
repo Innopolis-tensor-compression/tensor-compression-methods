@@ -731,11 +731,11 @@ def compress_model(
                     elapsed_time = time.perf_counter() - start_time
                     print(elapsed_time)
                     print(optimal_rank)
-                    setattr(child, name, conv_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
+                    setattr(model, name, conv_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
                 except Exception as e:
                     print(f"Error with method {method}: {e}")
             else:
-                setattr(child, name, conv_compression_func(child, rank_cpd, rank_tkd))
+                setattr(model, name, conv_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, ConvTranspose2d) and ConvTranspose2d in layers:
             if (conv_transpose_compression_method == "TKD" or conv_transpose_compression_method == "TKDCPD") and rank_tkd is None:
                 tensor = child.weight.reshape(
@@ -759,14 +759,13 @@ def compress_model(
                     elapsed_time = time.perf_counter() - start_time
                     print(elapsed_time)
                     print(optimal_rank)
-                    setattr(child, name, conv_transpose_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
+                    setattr(model, name, conv_transpose_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
                 except Exception as e:
                     print(f"Error with method {method}: {e}")
             else:
-                setattr(child, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
-            setattr(child, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
+                setattr(model, name, conv_transpose_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, Linear) and Linear in layers and linear_compress_method != "None":
-            setattr(child, name, FactorizedLinear.from_linear(child, factorization=linear_compress_method))
+            setattr(model, name, FactorizedLinear.from_linear(child, factorization=linear_compress_method))
         else:
             compress_model(
                 child,
