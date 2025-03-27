@@ -15,7 +15,6 @@ from torch.nn import Conv2d, ConvTranspose2d, Linear, Module, Sequential
 from torch.nn.modules.loss import _Loss
 from torch.nn.parameter import Parameter
 from torch.optim import Optimizer
-from torch.utils.data import DataLoader
 
 from src.model_compressor.calculate_optimized_rank_for_nn_layer import global_optimize_tucker_rank
 
@@ -89,7 +88,7 @@ def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(out_channels, in_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != torch.float32:
@@ -97,15 +96,15 @@ def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
 
     # If rank_cpd is not specified, it will be set to the smallest dimension of the kernel
     if rank_cpd is None:
-        rank_cpd = sorted(conv_weight.size())[0]
+        rank_cpd = min(conv_weight.shape)
 
     # CPD decomposition
     _, factors_cpd = parafac(conv_weight, rank_cpd)
 
     # Reshape factors to fit Conv2d layer
-    factor_cpd_input = factors_cpd[0].permute([1, 0]).unsqueeze(2).unsqueeze(3)
+    factor_cpd_input = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_cpd_hidden = factors_cpd[2].permute([1, 0]).unsqueeze(1).reshape(rank_cpd, 1, kernel_size_x, kernel_size_y)
-    factor_cpd_output = factors_cpd[1].unsqueeze(2).unsqueeze(3)
+    factor_cpd_output = factors_cpd[0].unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
     conv1_cpd = Conv2d(in_channels, rank_cpd, 1, dtype=torch.float32, bias=bias)
@@ -153,7 +152,7 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(out_channels, in_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != torch.float32:
@@ -161,14 +160,14 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
 
     # If rank_tkd is not specified, it will be set to the dimensions of the Conv2d layer
     if rank_tkd is None:
-        rank_tkd = [in_channels, out_channels]
+        rank_tkd = [out_channels, in_channels]
     else:
-        if rank_tkd[0] > in_channels:
-            rank_tkd = [in_channels, rank_tkd[1]]
-            warn("rank_tkd[0] is bigger then in_channels")
-        if rank_tkd[1] > out_channels:
-            rank_tkd = [rank_tkd[0], out_channels]
-            warn("rank_tkd[1] is bigger then out_channels")
+        if rank_tkd[1] > in_channels:
+            rank_tkd = (rank_tkd[0], in_channels)
+            warn("rank_tkd[1] is bigger then in_channels")
+        if rank_tkd[0] > out_channels:
+            rank_tkd = (out_channels, rank_tkd[1])
+            warn("rank_tkd[0] is bigger then out_channels")
 
     # TKD decomposition
     core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_y * kernel_size_x])
@@ -178,7 +177,7 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
     factor_tkd_hidden = (
         torch.tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
         .permute([2, 1, 0])
-        .reshape(rank_tkd[1], rank_tkd[0], kernel_size_x, kernel_size_y)
+        .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
     )
     factor_tkd_output = factors_tkd[1].unsqueeze(2).unsqueeze(3)
 
@@ -229,7 +228,7 @@ def tkd_cpd_conv2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(out_channels, in_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != torch.float32:
@@ -237,31 +236,31 @@ def tkd_cpd_conv2d(
 
     # If rank_tkd is not specified, it will be set to the dimensions of the Conv2d layer
     if rank_tkd is None:
-        rank_tkd = [in_channels, out_channels]
+        rank_tkd = [out_channels, in_channels]
     else:
-        if rank_tkd[0] > in_channels:
-            rank_tkd = (in_channels, rank_tkd[1], rank_tkd[2])
-            warn("rank_tkd[0] is bigger then in_channels")
-        if rank_tkd[1] > out_channels:
-            rank_tkd = (rank_tkd[0], out_channels, rank_tkd[2])
-            warn("rank_tkd[1] is bigger then out_channels")
+        if rank_tkd[1] > in_channels:
+            rank_tkd = (rank_tkd[0], in_channels)
+            warn("rank_tkd[1] is bigger then in_channels")
+        if rank_tkd[0] > out_channels:
+            rank_tkd = (out_channels, rank_tkd[1])
+            warn("rank_tkd[0] is bigger then out_channels")
 
     # TKD decomposition
     core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_x * kernel_size_y])
 
     # Reshape factors to fit Conv2d layer
-    factor_tkd_input = factors_tkd[0].permute([1, 0]).unsqueeze(2).unsqueeze(3)
+    factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_tkd_hidden = (
         torch.tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
         .permute([1, 2, 0])
         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
     )
-    factor_tkd_output = factors_tkd[1].unsqueeze(2).unsqueeze(3)
+    factor_tkd_output = factors_tkd[0].unsqueeze(2).unsqueeze(3)
 
     # CPD decomposition of middle Conv2d
     conv2_tkd = Conv2d(
-        rank_tkd[0],
         rank_tkd[1],
+        rank_tkd[0],
         (kernel_size_x, kernel_size_y),
         stride=stride,
         padding=padding,
@@ -273,8 +272,8 @@ def tkd_cpd_conv2d(
     conv2_tkd = cpd_conv2d(conv2_tkd, rank_cpd=rank_cpd)
 
     # Create compressed Conv2d layer
-    conv1_tkd = Conv2d(in_channels, rank_tkd[0], 1, dtype=torch.float32, bias=bias)
-    conv3_tkd = Conv2d(rank_tkd[1], out_channels, 1, dtype=torch.float32, bias=bias)
+    conv1_tkd = Conv2d(in_channels, rank_tkd[1], 1, dtype=torch.float32, bias=bias)
+    conv3_tkd = Conv2d(rank_tkd[0], out_channels, 1, dtype=torch.float32, bias=bias)
     conv1_tkd.weight = Parameter(factor_tkd_input)
     conv3_tkd.weight = Parameter(factor_tkd_output)
 
@@ -352,7 +351,7 @@ def cpd_conv_transpose2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(out_channels, in_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != torch.float32:
@@ -422,7 +421,7 @@ def tkd_conv_transpose2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
+    conv_weight = conv_layer.weight.reshape(out_channels, in_channels, kernel_size_x * kernel_size_y)
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != torch.float32:
@@ -430,15 +429,14 @@ def tkd_conv_transpose2d(
 
     # If rank_tkd is not specified, it will be set to the dimensions of the ConvTranspose2d layer
     if rank_tkd is None:
-        rank_tkd = [in_channels, out_channels]
+        rank_tkd = [out_channels, in_channels]
     else:
-        # if rank_tkd is bigger than in_channels or out_channels, it will be set to the size of ConvTranspose2d layer
-        if rank_tkd[0] > in_channels:
-            rank_tkd = [in_channels, rank_tkd[1]]
-            warn("rank_tkd[0] is bigger then in_channels. Setting it equal to in_channels")
-        if rank_tkd[1] > out_channels:
-            rank_tkd = [rank_tkd[0], out_channels]
-            warn("rank_tkd[1] is bigger then out_channels. Setting it equal to out_channels")
+        if rank_tkd[1] > in_channels:
+            rank_tkd = (rank_tkd[0], in_channels)
+            warn("rank_tkd[1] is bigger then in_channels")
+        if rank_tkd[0] > out_channels:
+            rank_tkd = (out_channels, rank_tkd[1])
+            warn("rank_tkd[0] is bigger then out_channels")
 
     # TKD decomposition
     core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_y * kernel_size_x])
@@ -497,7 +495,9 @@ def tkd_cpd_conv_transpose2d(
     padding = conv_layer.padding
     dilation = conv_layer.dilation
     bias = conv_layer.bias is not None
-    conv_weight = conv_layer.weight.reshape(in_channels, out_channels, kernel_size_x * kernel_size_y)
+    groups = conv_layer.groups
+    conv_weight = conv_layer.weight.reshape(out_channels, in_channels, kernel_size_x * kernel_size_y)
+
 
     # Due to limitations of tensorly, only float32 is supported
     if conv_weight.dtype != torch.float32:
@@ -505,14 +505,14 @@ def tkd_cpd_conv_transpose2d(
 
     # If rank_tkd is not specified, it will be set to the dimensions of the ConvTranspose2d layer
     if rank_tkd is None:
-        rank_tkd = [in_channels, out_channels]
+        rank_tkd = [out_channels, in_channels]
     else:
-        if rank_tkd[0] > in_channels:
-            rank_tkd = [in_channels, rank_tkd[1]]
-            warn("rank_tkd[0] is bigger then in_channels. Setting it equal to in_channels")
-        if rank_tkd[1] > out_channels:
-            rank_tkd = [rank_tkd[0], out_channels]
-            warn("rank_tkd[1] is bigger then out_channels. Setting it equal to out_channels")
+        if rank_tkd[1] > in_channels:
+            rank_tkd = (rank_tkd[0], in_channels)
+            warn("rank_tkd[1] is bigger then in_channels")
+        if rank_tkd[0] > out_channels:
+            rank_tkd = (out_channels, rank_tkd[1])
+            warn("rank_tkd[0] is bigger then out_channels")
 
     # TKD decomposition
     core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_x * kernel_size_y])
@@ -536,6 +536,7 @@ def tkd_cpd_conv_transpose2d(
         dilation=dilation,
         dtype=torch.float32,
         bias=bias,
+        groups=groups
     )
     conv2_tkd.weight = Parameter(factor_tkd_hidden)
     conv2_tkd = cpd_conv_transpose2d(conv2_tkd, rank_cpd=rank_cpd)
@@ -547,25 +548,6 @@ def tkd_cpd_conv_transpose2d(
     conv3_tkd.weight = Parameter(factor_tkd_output)
 
     return Sequential(conv1_tkd, conv2_tkd, conv3_tkd)
-
-
-def __get_last_layer(model: Module):
-    """
-    Function to detect last layer of the model to preserve output size of the model.
-
-    Args:
-        model: Model to find last layer.
-
-    Returns:
-        str: Name of the last layer.
-        Module: Last layer of the model.
-
-    """
-    last_name, last_layer = None, None
-    for name, layer in model.named_modules():
-        if isinstance(layer, (Linear, Conv2d, ConvTranspose2d)):
-            last_name, last_layer = name, layer
-    return last_name, last_layer
 
 
 def compress_model(
@@ -649,15 +631,16 @@ def compress_model(
 
     if isinstance(model, (Linear, Conv2d, ConvTranspose2d)):
         if isinstance(model, Conv2d) and Conv2d in layers:
+            if model.groups > 1:
+                warn("Depthwise convolution is not supported. This layer will not be compressed.")
+                return
             if (conv_compression_method == "TKD" or conv_compression_method == "TKDCPD") and rank_tkd is None:
                 tensor = model.weight.reshape(
                     model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
                 ).detach().numpy()
 
                 method = "differential_evolution"
-
                 try:
-                    start_time = time.perf_counter()
                     reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
                         global_optimize_tucker_rank(
                             optimization_method=method,
@@ -668,14 +651,14 @@ def compress_model(
                             verbose=True,
                         )
                     )
-                    elapsed_time = time.perf_counter() - start_time
-                    print(elapsed_time)
-                    print(optimal_rank)
-                    rank_tkd = [optimal_rank[1], optimal_rank[0]]
+                    rank_tkd = optimal_rank[0:2]
                 except Exception as e:
                     print(f"Error with method {method}: {e}")
             model = conv_compression_func(model, rank_cpd, rank_tkd)
         elif isinstance(model, ConvTranspose2d) and ConvTranspose2d in layers:
+            if model.groups > 1:
+                warn("Depthwise convolution is not supported. This layer will not be compressed.")
+                return
             if (conv_transpose_compression_method == "TKD" or conv_transpose_compression_method == "TKDCPD") and rank_tkd is None:
                 tensor = model.weight.reshape(
                     model.weight.size()[0], model.weight.size()[1], model.weight.size()[2] * model.weight.size()[3]
@@ -684,7 +667,6 @@ def compress_model(
                 method = "differential_evolution"
 
                 try:
-                    start_time = time.perf_counter()
                     reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
                         global_optimize_tucker_rank(
                             optimization_method=method,
@@ -695,10 +677,7 @@ def compress_model(
                             verbose=True,
                         )
                     )
-                    elapsed_time = time.perf_counter() - start_time
-                    print(elapsed_time)
-                    print(optimal_rank)
-                    rank_tkd = [optimal_rank[1], optimal_rank[0]]
+                    rank_tkd = optimal_rank[0:2]
                 except Exception as e:
                     print(f"Error with method {method}: {e}")
 
@@ -709,6 +688,9 @@ def compress_model(
 
     for name, child in model.named_children():
         if isinstance(child, Conv2d) and Conv2d in layers:
+            if child.groups > 1:
+                warn("Depthwise convolution is not supported. This layer will not be compressed.")
+                continue
             if (conv_compression_method == "TKD" or conv_compression_method == "TKDCPD") and rank_tkd is None:
                 tensor = child.weight.reshape(
                     child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
@@ -717,7 +699,6 @@ def compress_model(
                 method = "differential_evolution"
 
                 try:
-                    start_time = time.perf_counter()
                     reconstructed_tensor, weight, factors, optimal_rank, final_loss_value, optimize_result, iteration_logs = (
                         global_optimize_tucker_rank(
                             optimization_method=method,
@@ -728,15 +709,17 @@ def compress_model(
                             verbose=True,
                         )
                     )
-                    elapsed_time = time.perf_counter() - start_time
-                    print(elapsed_time)
-                    print(optimal_rank)
-                    setattr(model, name, conv_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
+                    if child.groups > 1:
+                        pass
+                    setattr(model, name, conv_compression_func(child, rank_cpd, optimal_rank[0:2]))
                 except Exception as e:
                     print(f"Error with method {method}: {e}")
             else:
                 setattr(model, name, conv_compression_func(child, rank_cpd, rank_tkd))
         elif isinstance(child, ConvTranspose2d) and ConvTranspose2d in layers:
+            if child.groups > 1:
+                warn("Depthwise convolution is not supported. This layer will not be compressed.")
+                continue
             if (conv_transpose_compression_method == "TKD" or conv_transpose_compression_method == "TKDCPD") and rank_tkd is None:
                 tensor = child.weight.reshape(
                     child.weight.size()[0], child.weight.size()[1], child.weight.size()[2] * child.weight.size()[3]
@@ -759,7 +742,7 @@ def compress_model(
                     elapsed_time = time.perf_counter() - start_time
                     print(elapsed_time)
                     print(optimal_rank)
-                    setattr(model, name, conv_transpose_compression_func(child, rank_cpd, [optimal_rank[1], optimal_rank[0]]))
+                    setattr(model, name, conv_transpose_compression_func(child, rank_cpd, optimal_rank[0:2]))
                 except Exception as e:
                     print(f"Error with method {method}: {e}")
             else:
