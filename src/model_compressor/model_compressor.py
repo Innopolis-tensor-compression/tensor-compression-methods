@@ -96,10 +96,10 @@ def cpd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
 
     # If rank_cpd is not specified, it will be set to the smallest dimension of the kernel
     if rank_cpd is None:
-        rank_cpd = min(conv_weight.shape)
+        rank_cpd = max(conv_weight.shape)
 
     # CPD decomposition
-    _, factors_cpd = parafac(conv_weight, rank_cpd)
+    _, factors_cpd = parafac(conv_weight, rank_cpd, init="random")
 
     # Reshape factors to fit Conv2d layer
     factor_cpd_input = factors_cpd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
@@ -141,7 +141,7 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
 
     """
     if conv_layer.kernel_size == (1, 1):
-        return svd_conv2d(conv_layer, min(rank_tkd) if rank_tkd is not None else None)
+        return svd_conv2d(conv_layer, rank_cpd)
 
     # Params of source conv_layer
     out_channels = conv_layer.out_channels
@@ -163,23 +163,23 @@ def tkd_conv2d(conv_layer: Conv2d, rank_cpd: int = None, rank_tkd: list[int] | t
         rank_tkd = [out_channels, in_channels]
     else:
         if rank_tkd[1] > in_channels:
-            rank_tkd = (rank_tkd[0], in_channels)
+            rank_tkd = [rank_tkd[0], in_channels]
             warn("rank_tkd[1] is bigger then in_channels")
         if rank_tkd[0] > out_channels:
-            rank_tkd = (out_channels, rank_tkd[1])
+            rank_tkd = [out_channels, rank_tkd[1]]
             warn("rank_tkd[0] is bigger then out_channels")
 
     # TKD decomposition
-    core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_y * kernel_size_x])
+    core_tkd, factors_tkd = tucker(conv_weight, rank_tkd + [kernel_size_x * kernel_size_y])
 
     # Reshape factors to fit Conv2d layer
-    factor_tkd_input = factors_tkd[0].permute([1, 0]).unsqueeze(2).unsqueeze(3)
+    factor_tkd_input = factors_tkd[1].permute([1, 0]).unsqueeze(2).unsqueeze(3)
     factor_tkd_hidden = (
         torch.tensordot(factors_tkd[2], core_tkd, dims=([1], [2]))
-        .permute([2, 1, 0])
+        .permute([1, 2, 0])
         .reshape(rank_tkd[0], rank_tkd[1], kernel_size_x, kernel_size_y)
     )
-    factor_tkd_output = factors_tkd[1].unsqueeze(2).unsqueeze(3)
+    factor_tkd_output = factors_tkd[0].unsqueeze(2).unsqueeze(3)
 
     # Create compressed Conv2d layer
     conv1_tkd = Conv2d(in_channels, rank_tkd[1], 1, dtype=torch.float32, bias=bias)
@@ -239,10 +239,10 @@ def tkd_cpd_conv2d(
         rank_tkd = [out_channels, in_channels]
     else:
         if rank_tkd[1] > in_channels:
-            rank_tkd = (rank_tkd[0], in_channels)
+            rank_tkd = [rank_tkd[0], in_channels]
             warn("rank_tkd[1] is bigger then in_channels")
         if rank_tkd[0] > out_channels:
-            rank_tkd = (out_channels, rank_tkd[1])
+            rank_tkd = [out_channels, rank_tkd[1]]
             warn("rank_tkd[0] is bigger then out_channels")
 
     # TKD decomposition
@@ -359,14 +359,14 @@ def cpd_conv_transpose2d(
 
     # If rank_cpd is not specified, it will be set to the smallest dimension of the kernel
     if rank_cpd is None:
-        rank_cpd = min(conv_weight.size())
+        rank_cpd = max(conv_weight.size())
 
     if rank_cpd > max(conv_weight.size()):
         warn("rank_cpd is bigger than the size of largest dimension. Setting it equal to the size of largest dimension")
         rank_cpd = max(conv_weight.size())
 
     # CPD decomposition
-    _, factors_cpd = parafac(conv_weight, rank_cpd, verbose=100, init="random")
+    _, factors_cpd = parafac(conv_weight, rank_cpd, init="random")
 
     # Reshape factors to fit ConvTranspose2d layer
     factor_cpd_input = factors_cpd[0].unsqueeze(2).unsqueeze(3)
