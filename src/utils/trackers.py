@@ -24,21 +24,24 @@ class GPUTorchMemoryTracker(IGPUMemoryTracker):
     def __init__(self):
         self.gpu_allocated_memory_before = 0.0
         self.gpu_allocated_memory_after = 0.0
-        self.gpu_cached_memory_before = 0.0
-        self.gpu_cached_memory_after = 0.0
+        # self.gpu_cached_memory_before = 0.0
+        # self.gpu_cached_memory_after = 0.0
 
     def start(self) -> None:
-        self.gpu_allocated_memory_before = torch.cuda.memory_allocated()
-        self.gpu_cached_memory_before = torch.cuda.memory_reserved()
+        self.gpu_allocated_memory_before = torch.cuda.max_memory_allocated()
+        # self.gpu_cached_memory_before = torch.cuda.memory_reserved()
 
     def stop(self) -> None:
-        self.gpu_allocated_memory_after = torch.cuda.memory_allocated()
-        self.gpu_cached_memory_after = torch.cuda.memory_reserved()
+        self.gpu_allocated_memory_after = torch.cuda.max_memory_allocated()
+        # self.gpu_cached_memory_after = torch.cuda.memory_reserved()
 
     def get_usage(self) -> dict:
         gpu_allocated_memory_used = self.gpu_allocated_memory_after - self.gpu_allocated_memory_before
-        gpu_cached_memory_used = self.gpu_cached_memory_after - self.gpu_cached_memory_before
-        return {"gpu_allocated_memory_used_mb": gpu_allocated_memory_used / 1024**2, "gpu_cached_memory_used_mb": gpu_cached_memory_used / 1024**2}
+        # gpu_cached_memory_used = self.gpu_cached_memory_after - self.gpu_cached_memory_before
+        return {
+            "gpu_allocated_memory_used_mb": gpu_allocated_memory_used / 1024**2,
+            # "gpu_cached_memory_used_mb": gpu_cached_memory_used / 1024**2
+        }
 
 
 class GPUTensorflowMemoryTracker(IGPUMemoryTracker):
@@ -47,25 +50,32 @@ class GPUTensorflowMemoryTracker(IGPUMemoryTracker):
 
         self.gpu_allocated_memory_before = 0.0
         self.gpu_allocated_memory_after = 0.0
-        self.gpu_cached_memory_before = 0.0
-        self.gpu_cached_memory_after = 0.0
+        # self.gpu_cached_memory_before = 0.0
+        # self.gpu_cached_memory_after = 0.0
 
     def start(self) -> None:
         devices_memory_info = list(map(tf.config.experimental.get_memory_info, self.devices))
 
-        self.gpu_allocated_memory_before = sum(device_memory_info["current"] / (1024**2) for device_memory_info in devices_memory_info)
-        self.gpu_cached_memory_before = sum(device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info)
+        self.gpu_allocated_memory_before = sum(
+            device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info
+        )
+        # self.gpu_cached_memory_before = sum(device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info)
 
     def stop(self) -> None:
         devices_memory_info = list(map(tf.config.experimental.get_memory_info, self.devices))
 
-        self.gpu_allocated_memory_after = sum(device_memory_info["current"] / (1024**2) for device_memory_info in devices_memory_info)
-        self.gpu_cached_memory_after = sum(device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info)
+        self.gpu_allocated_memory_after = sum(
+            device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info
+        )
+        # self.gpu_cached_memory_after = sum(device_memory_info["peak"] / (1024**2) for device_memory_info in devices_memory_info)
 
     def get_usage(self) -> dict:
         gpu_allocated_memory_used = self.gpu_allocated_memory_after - self.gpu_allocated_memory_before
-        gpu_cached_memory_used = self.gpu_cached_memory_after - self.gpu_cached_memory_before
-        return {"gpu_allocated_memory_used_mb": gpu_allocated_memory_used, "gpu_cached_memory_used_mb": gpu_cached_memory_used}
+        # gpu_cached_memory_used = self.gpu_cached_memory_after - self.gpu_cached_memory_before
+        return {
+            "gpu_allocated_memory_used_mb": gpu_allocated_memory_used,
+            # "gpu_cached_memory_used_mb": gpu_cached_memory_used
+        }
 
 
 class IRAMMemoryTracker(ABC):
@@ -111,10 +121,10 @@ class TimeTracker(ITimeTracker):
         self.end_time = 0.0
 
     def start(self) -> None:
-        self.start_time = time.time()
+        self.start_time = time.perf_counter()
 
     def stop(self) -> None:
-        self.end_time = time.time()
+        self.end_time = time.perf_counter()
 
     def get_duration(self) -> float:
         return self.end_time - self.start_time

@@ -1,5 +1,6 @@
 import gc
 
+import tensorflow as tf
 import torch
 
 from src.utils.metrics_calculators import CompressionRationFactory, FrobeniusErrorFactory
@@ -37,6 +38,10 @@ class MethodRunner:
         if self.backend_name == "pytorch":
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            torch.cuda.reset_peak_memory_stats()
+        elif self.backend_name == "tensorflow":
+            tf.keras.backend.clear_session()
         gc.collect()
 
         self.gpu_memory_tracker.start()
@@ -46,6 +51,8 @@ class MethodRunner:
 
         if self.backend_name == "pytorch":
             torch.cuda.synchronize()
+        elif self.backend_name == "tensorflow":
+            tf.keras.backend.clear_session()
         self.time_tracker.stop()
         self.gpu_memory_tracker.stop()
 
@@ -56,12 +63,18 @@ class MethodRunner:
         if self.backend_name == "pytorch":
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            torch.cuda.reset_peak_memory_stats()
+        elif self.backend_name == "tensorflow":
+            tf.keras.backend.clear_session()
         gc.collect()
 
     def calculate_reconstructed_tensor(self, library_method_name: str):
         if self.result is None:
             return None
-        return TensorReconstructorFactory.create_reconstructor(library_method_name=library_method_name).calculate(method_result=self.result)
+        return TensorReconstructorFactory.create_reconstructor(library_method_name=library_method_name).calculate(
+            method_result=self.result
+        )
 
     def calculate_frobenius_error(self, library_method_name: str) -> float | None:
         if self.result is None or self.reconstructed_tensor is None:
